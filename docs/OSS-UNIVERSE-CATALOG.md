@@ -84,7 +84,7 @@ Located at `mcp-server/server.mjs`. Exposes 5 tools:
 |---|---|:---:|---|---|
 | **Krit.OmniFramework** | 1.1.14 | ✅ | Kritical PowerShell foundation (auto-loads PSFramework + PSSharedGoods + PSWriteHTML + ImportExcel). | Path C `Kritical.PS.SCXCode` declares `ExternalModuleDependencies = @('Krit.OmniFramework')` per the resilience pattern (memory pin per `KRTPax8ToShopifyConnector` CLAUDE.md). |
 | **Krit.Pax8Mcp** | 1.0.0 | ✅ | Multi-agent Pax8 MCP wiring pattern. | **Reference pattern for our own MCP wiring**. |
-| **Krit.Hardening** | 1.0.1 | ✅ | Windows hardening audit (HotCakeX + HardeningKitty + DSC). | KEEP-EYES-ON for the `audit-my-change` slash command. |
+| **Kritical.PS.Hardening** | 1.0.1 | ✅ | Windows hardening audit (HotCakeX + HardeningKitty + DSC). | KEEP-EYES-ON for the `audit-my-change` slash command. |
 | **Krit.OpenApi** | 0.1.0 (local) | ⌛ | OpenAPI 3.x → PS module generator. | **Generate `Kritical.PS.SCXCode` directly from SCX's OpenAPI spec once SCX publishes one**. Currently our psm1 is hand-written. |
 
 ## §E — Testing / linting glue
