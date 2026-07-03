@@ -2,7 +2,7 @@
   "name": "SCXCode",
   "displayName": "Kritical SCXCode",
   "description": "SCX in VS Code the Kritical way — chat + inline complete + model picker + auto-failover for MiniMax-M2.7 / MAGPiE / gpt-oss-120b / DeepSeek-V3.1 / coder / gemma-4 / Qwen3 / Llama-4-Maverick.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "kritical",
   "author": {
     "name": "Joshua Finley",
@@ -88,10 +88,22 @@
         }
       ],
       "commandPalette": [
-        { "command": "kritical.scxcode.openChat", "when": "true" },
-        { "command": "kritical.scxcode.pickModel", "when": "true" },
-        { "command": "kritical.scxcode.testConnection", "when": "true" },
-        { "command": "kritical.scxcode.showStatus", "when": "true" }
+        {
+          "command": "kritical.scxcode.openChat",
+          "when": "true"
+        },
+        {
+          "command": "kritical.scxcode.pickModel",
+          "when": "true"
+        },
+        {
+          "command": "kritical.scxcode.testConnection",
+          "when": "true"
+        },
+        {
+          "command": "kritical.scxcode.showStatus",
+          "when": "true"
+        }
       ]
     },
     "viewsContainers": {
@@ -179,14 +191,20 @@
             "MAGPiE",
             "gpt-oss-120b"
           ],
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Auto-failover chain on 429 / 5xx. Tries each in order. Empty array disables failover.",
           "markdownDescription": "Auto-failover chain on **429 / 5xx**. Tries each in order. Set to `[]` to disable failover (single-model mode)."
         },
         "kritical.scxcode.autocompact": {
           "type": "string",
           "default": "auto",
-          "enum": ["off", "auto", "aggressive"],
+          "enum": [
+            "off",
+            "auto",
+            "aggressive"
+          ],
           "enumDescriptions": [
             "Never summarise — send full history until model context limit (may fail on long chats)",
             "Summarise oldest turns when context reaches 75% (recommended)",
@@ -203,14 +221,23 @@
         "kritical.scxcode.telemetry": {
           "type": "string",
           "default": "off",
-          "enum": ["off", "local-only", "kritical-endpoint"],
+          "enum": [
+            "off",
+            "local-only",
+            "kritical-endpoint"
+          ],
           "description": "Cost + latency telemetry. `off` = zero collection. `local-only` = writes to Kritical.SCXCode.log in workspace. `kritical-endpoint` = also POSTs to Kritical telemetry endpoint (requires opt-in HKCU var).",
           "scope": "application"
         },
         "kritical.scxcode.autoContext": {
           "type": "string",
           "default": "file+selection",
-          "enum": ["off", "file", "file+selection", "workspace-tree"],
+          "enum": [
+            "off",
+            "file",
+            "file+selection",
+            "workspace-tree"
+          ],
           "enumDescriptions": [
             "No auto-context. Only the operator's prompt is sent.",
             "Include active file path + language + ± 30-line cursor window.",
@@ -254,7 +281,9 @@
     "color": "#13365C",
     "theme": "dark"
   },
-  "extensionKind": ["ui"],
+  "extensionKind": [
+    "ui"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",

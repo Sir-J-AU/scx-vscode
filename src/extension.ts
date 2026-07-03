@@ -320,55 +320,259 @@ function chatHtml(): string {
   return `<!doctype html><html><head><meta charset="utf-8" />
 <title>Kritical SCXCode</title>
 <style nonce="${nonce}">
-body { font-family: system-ui, sans-serif; margin: 0; background: #f3f3f3; color: #121212; }
-.top { background: #13365C; color: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
-.top .brand { font-weight: 600; letter-spacing: 0.3px; }
-.top .model { margin-left: auto; font-family: ui-monospace, monospace; font-size: 12px; opacity: 0.85; }
-#chat { padding: 12px 16px; height: calc(100vh - 130px); overflow-y: auto; }
-.msg { padding: 8px 12px; margin: 8px 0; border-radius: 6px; max-width: 80%; }
-.user { background: #F2B500; color: #121212; margin-left: auto; }
-.assistant { background: #fff; color: #121212; border: 1px solid #e5e7eb; }
-.error { background: #fee2e2; color: #991b1b; }
-.meta { font-size: 11px; opacity: 0.7; margin-top: 4px; }
-.input { position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 16px; background: #fff; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; }
-.input textarea { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-family: system-ui; resize: none; min-height: 40px; }
-.input button { padding: 8px 20px; background: #13365C; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-weight: 500; }
-.input button:disabled { opacity: 0.5; }
+:root {
+  --kr-primary: #13365C;
+  --kr-accent: #F2B500;
+  --kr-user-bg: #F2B500;
+  --kr-bg: var(--vscode-editor-background, #1e1e1e);
+  --kr-fg: var(--vscode-editor-foreground, #e5e5e5);
+  --kr-panel: var(--vscode-editorWidget-background, #252526);
+  --kr-border: var(--vscode-panel-border, #3e3e42);
+  --kr-danger: #D72638;
+  --kr-mono: var(--vscode-editor-font-family, ui-monospace, Consolas, monospace);
+}
+* { box-sizing: border-box; }
+body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0; background: var(--kr-bg); color: var(--kr-fg); font-size: var(--vscode-font-size, 13px); }
+.top { background: var(--kr-primary); color: #fff; padding: 8px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--kr-accent); }
+.top .brand { font-weight: 600; letter-spacing: 0.3px; display: flex; align-items: center; gap: 6px; }
+.top .brand::before { content: '◆'; color: var(--kr-accent); font-size: 14px; }
+.top .model-badge { margin-left: auto; font-family: var(--kr-mono); font-size: 11px; padding: 2px 8px; background: rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer; }
+.top .clear-btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.top .clear-btn:hover { background: rgba(255,255,255,0.15); }
+#chat { padding: 12px; overflow-y: auto; height: calc(100vh - 130px); }
+.msg { padding: 8px 10px; margin: 6px 0; border-radius: 5px; max-width: 92%; word-wrap: break-word; }
+.msg.user { background: var(--kr-user-bg); color: #121212; margin-left: auto; }
+.msg.assistant { background: var(--kr-panel); color: var(--kr-fg); border: 1px solid var(--kr-border); }
+.msg.error { background: var(--kr-danger); color: #fff; }
+.msg.assistant pre { background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0; font-family: var(--kr-mono); font-size: 12px; position: relative; }
+.msg.assistant code { font-family: var(--kr-mono); background: rgba(255,255,255,0.05); padding: 0 3px; border-radius: 2px; }
+.msg.assistant pre code { background: transparent; padding: 0; }
+.copy-btn { position: absolute; top: 4px; right: 4px; background: var(--kr-primary); color: #fff; border: 0; padding: 2px 6px; font-size: 10px; border-radius: 3px; cursor: pointer; opacity: 0.7; }
+.copy-btn:hover { opacity: 1; }
+.meta { font-size: 10px; opacity: 0.65; margin-top: 4px; font-family: var(--kr-mono); }
+.error-actions { margin-top: 6px; display: flex; gap: 6px; }
+.error-actions button { background: #fff; color: var(--kr-danger); border: 0; padding: 3px 10px; font-size: 11px; border-radius: 3px; cursor: pointer; font-weight: 600; }
+.input { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 12px; background: var(--kr-panel); border-top: 1px solid var(--kr-border); display: flex; gap: 6px; }
+.input textarea { flex: 1; padding: 6px 8px; border: 1px solid var(--kr-border); border-radius: 4px; font-family: var(--vscode-font-family); font-size: 13px; background: var(--kr-bg); color: var(--kr-fg); resize: none; min-height: 38px; max-height: 200px; }
+.input button.send { padding: 6px 14px; background: var(--kr-primary); color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-weight: 500; }
+.input button.send:hover { background: #1a4574; }
+.input button.send:disabled { opacity: 0.5; cursor: not-allowed; }
+.footer { position: fixed; bottom: 0; right: 12px; font-size: 10px; opacity: 0.4; padding: 2px 6px; font-family: var(--kr-mono); pointer-events: none; }
+.spinner { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--kr-accent); animation: pulse 1s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 </style></head><body>
-<div class="top"><div class="brand">Kritical SCXCode</div><div class="model" id="model">MiniMax-M2.7</div></div>
+<div class="top">
+  <div class="brand">Kritical SCXCode</div>
+  <div class="model-badge" id="model" title="Click to change">MiniMax-M2.7</div>
+  <button class="clear-btn" id="clear">Clear</button>
+</div>
 <div id="chat"></div>
-<div class="input"><textarea id="in" placeholder="Ask anything…"></textarea><button id="send">Send</button></div>
+<div class="input">
+  <textarea id="in" placeholder="Ask anything… (Shift+Enter for newline)"></textarea>
+  <button class="send" id="send">Send</button>
+</div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 const chat = document.getElementById('chat');
 const input = document.getElementById('in');
 const send = document.getElementById('send');
-const model = document.getElementById('model');
-const history = [];
-function add(role, text, meta) {
-  const div = document.createElement('div'); div.className = 'msg ' + role; div.textContent = text;
-  if (meta) { const m = document.createElement('div'); m.className = 'meta'; m.textContent = meta; div.appendChild(m); }
-  chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+const modelEl = document.getElementById('model');
+const clearBtn = document.getElementById('clear');
+let sessionInTokens = 0;
+let sessionOutTokens = 0;
+
+// Minimal markdown → HTML: fenced code, inline code, bold, italic, links, line breaks.
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function renderMarkdown(text) {
+  const parts = [];
+  const codeBlockRe = /\`\`\`(\\w*)\\n?([\\s\\S]*?)\`\`\`/g;
+  let lastIndex = 0, m;
+  while ((m = codeBlockRe.exec(text)) !== null) {
+    if (m.index > lastIndex) parts.push({ kind: 'text', body: text.slice(lastIndex, m.index) });
+    parts.push({ kind: 'code', lang: m[1] || '', body: m[2] });
+    lastIndex = codeBlockRe.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push({ kind: 'text', body: text.slice(lastIndex) });
+  const html = parts.map(p => {
+    if (p.kind === 'code') {
+      const id = 'c' + Math.random().toString(36).slice(2, 8);
+      return '<pre><button class="copy-btn" data-copy="' + id + '">copy</button><code id="' + id + '" data-lang="' + esc(p.lang) + '">' + esc(p.body) + '</code></pre>';
+    }
+    return esc(p.body)
+      .replace(/\`([^\`\\n]+)\`/g, '<code>$1</code>')
+      .replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>')
+      .replace(/\\*([^*\\n]+)\\*/g, '<em>$1</em>')
+      .replace(/\\[([^\\]]+)\\]\\(([^\\)]+)\\)/g, '<a href="$2" target="_blank">$1</a>')
+      .replace(/\\n/g, '<br/>');
+  }).join('');
+  return html;
 }
-send.onclick = () => {
-  const text = input.value.trim(); if (!text) return;
-  add('user', text); history.push({ role: 'user', content: text }); input.value = ''; send.disabled = true;
-  vscode.postMessage({ type: 'chat', history });
+
+function add(role, text, meta, opts) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  if (role === 'assistant') {
+    div.innerHTML = renderMarkdown(text);
+  } else {
+    div.textContent = text;
+  }
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  if (opts && opts.showKeySwitch) {
+    const actions = document.createElement('div');
+    actions.className = 'error-actions';
+    const btn = document.createElement('button');
+    btn.textContent = 'Switch SCX key';
+    btn.onclick = () => vscode.postMessage({ type: 'switchKey' });
+    actions.appendChild(btn);
+    div.appendChild(actions);
+  }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+
+  // Wire copy buttons for any newly-rendered code blocks
+  div.querySelectorAll('.copy-btn').forEach(b => {
+    b.onclick = () => {
+      const target = document.getElementById(b.dataset.copy);
+      if (target) navigator.clipboard.writeText(target.textContent);
+      b.textContent = 'copied ✓';
+      setTimeout(() => (b.textContent = 'copy'), 1500);
+    };
+  });
+}
+
+modelEl.onclick = () => vscode.postMessage({ type: 'pickModel' });
+clearBtn.onclick = () => {
+  chat.innerHTML = '';
+  sessionInTokens = 0; sessionOutTokens = 0;
+  vscode.postMessage({ type: 'clear' });
 };
-input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); } };
+
+send.onclick = () => {
+  const text = input.value.trim();
+  if (!text) return;
+  add('user', text);
+  input.value = '';
+  send.disabled = true;
+  vscode.postMessage({ type: 'chat', text });
+};
+input.onkeydown = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); }
+};
+
 window.addEventListener('message', (e) => {
   const m = e.data;
-  if (m.type === 'reply') { add('assistant', m.text, m.model + ' · ' + m.tokensIn + ' in / ' + m.tokensOut + ' out'); history.push({ role: 'assistant', content: m.text }); model.textContent = m.model; send.disabled = false; }
-  else if (m.type === 'error') { add('error', m.error); send.disabled = false; }
-  else if (m.type === 'ready') { vscode.postMessage({ type: 'config' }); }
-  else if (m.type === 'config') { model.textContent = m.config.defaultModel; }
+  if (m.type === 'reply') {
+    sessionInTokens += (m.tokensIn || 0);
+    sessionOutTokens += (m.tokensOut || 0);
+    const keyLabel = m.keyIndex > 1 ? ' · key' + m.keyIndex : '';
+    const ctxLabel = m.autoContextChars > 0 ? ' · ctx ' + m.autoContextChars + 'c' : '';
+    add('assistant', m.text, m.model + keyLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
+    modelEl.textContent = m.model;
+    send.disabled = false;
+  } else if (m.type === 'error') {
+    const is429 = /429|rate.limit|Daily token limit/i.test(m.error);
+    add('error', m.error, null, { showKeySwitch: is429 });
+    send.disabled = false;
+  } else if (m.type === 'cleared') {
+    // no-op — chat already cleared client-side
+  } else if (m.type === 'ready') {
+    vscode.postMessage({ type: 'config' });
+  } else if (m.type === 'config') {
+    if (m.model) modelEl.textContent = m.model;
+    if (m.keyCount > 1) modelEl.title = 'Click to change model · ' + m.keyCount + ' SCX keys available';
+  } else if (m.type === 'keySwitched') {
+    add('assistant', '_🔑 Switched to key #' + m.newKeyIndex + ' — retry your last message._');
+    send.disabled = false;
+  }
 });
-</script></body></html>`;
+</script>
+<div class="footer">© Kritical Pty Ltd · v0.1.0</div>
+</body></html>`;
 }
 
 // ────────────────────────────────────────────────────────────────
 // activation
 // ────────────────────────────────────────────────────────────────
+
+// .5165g — Sidebar WebviewViewProvider so the activity-bar view actually
+// renders the chat panel (not just an empty container).
+class KriticalChatViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'kritical.scxcode.chat';
+  private _view?: vscode.WebviewView;
+  private _history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+
+  resolveWebviewView(view: vscode.WebviewView) {
+    this._view = view;
+    view.webview.options = { enableScripts: true };
+    view.webview.html = chatHtml();
+    view.webview.onDidReceiveMessage(async (msg) => {
+      if (msg.type === 'chat') {
+        this._history.push({ role: 'user', content: msg.text });
+        try {
+          // Prepend auto-context from the active editor
+          const ctx = buildAutoContext();
+          const messagesForApi: ScxMessage[] = [...this._history];
+          if (ctx && messagesForApi.length > 0) {
+            messagesForApi[messagesForApi.length - 1] = {
+              role: 'user',
+              content: ctx + msg.text,
+            };
+          }
+          const { res, modelUsed, keyIndex } = await scxPostWithFailover(messagesForApi, 1200);
+          const replyText = res.content.map((c) => c.text).join('');
+          this._history.push({ role: 'assistant', content: replyText });
+          view.webview.postMessage({
+            type: 'reply',
+            text: replyText,
+            model: modelUsed,
+            keyIndex,
+            tokensIn: res.usage.input_tokens,
+            tokensOut: res.usage.output_tokens,
+            autoContextChars: ctx.length,
+          });
+        } catch (e) {
+          view.webview.postMessage({ type: 'error', error: (e as Error).message });
+        }
+      } else if (msg.type === 'clear') {
+        this._history = [];
+        view.webview.postMessage({ type: 'cleared' });
+      } else if (msg.type === 'pickModel') {
+        vscode.commands.executeCommand('kritical.scxcode.pickModel');
+      } else if (msg.type === 'switchKey') {
+        // Rotate to the next healthy SCX key file via the PS helper OR by
+        // walking through SCX_API_KEY_2..SCX_API_KEY_9 promoting the next.
+        try {
+          const cfg = getConfig();
+          if (cfg.apiKeys.length < 2) {
+            view.webview.postMessage({ type: 'error', error: 'Only one SCX key available (SCX_API_KEY). Set SCX_API_KEY_2..9 in HKCU or run Switch-KritScxKey.' });
+            return;
+          }
+          // Rotate: shift first to end.
+          const next = cfg.apiKeys[1];
+          const newIndex = 2;
+          process.env.SCX_API_KEY = next;
+          view.webview.postMessage({ type: 'keySwitched', newKeyIndex: newIndex });
+        } catch (e) {
+          view.webview.postMessage({ type: 'error', error: 'Key switch failed: ' + (e as Error).message });
+        }
+      } else if (msg.type === 'config') {
+        const cfg = getConfig();
+        view.webview.postMessage({
+          type: 'config',
+          model: cfg.defaultModel,
+          keyCount: cfg.apiKeys.length,
+          autoContext: cfg.autoContext,
+        });
+      }
+    });
+    view.webview.postMessage({ type: 'ready' });
+  }
+}
 
 export function activate(context: vscode.ExtensionContext) {
   const cmds: Array<[string, (...args: any[]) => any]> = [
@@ -383,15 +587,26 @@ export function activate(context: vscode.ExtensionContext) {
   for (const [id, fn] of cmds) {
     context.subscriptions.push(vscode.commands.registerCommand(id, fn));
   }
+
+  // .5165g — REGISTER the sidebar chat webview provider so activity-bar view renders.
+  const chatProvider = new KriticalChatViewProvider();
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(KriticalChatViewProvider.viewType, chatProvider, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
+  );
+
   // Status bar
   const sb = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   sb.text = '$(comment-discussion) Kritical SCXCode';
   sb.tooltip = 'Click to open Kritical SCXCode chat';
-  sb.command = 'kritical.scxcode.openChat';
+  sb.command = 'workbench.view.extension.kritical-scxcode';
   sb.show();
   context.subscriptions.push(sb);
+
   const out = vscode.window.createOutputChannel('Kritical SCXCode');
   out.appendLine('Kritical SCXCode activated · ' + new Date().toISOString());
+  out.appendLine('Sidebar view registered: kritical.scxcode.chat');
   out.appendLine('Run "Kritical: Test SCX Connection" from the command palette to verify auth.');
 }
 
