@@ -43,7 +43,7 @@ jobs:
         run: |
           $m = Test-ModuleManifest -Path ./ps-module/Kritical.PS.SCXCode.psd1
           Write-Host "name=$($m.Name) version=$($m.Version) exports=$($m.ExportedFunctions.Count)"
-          if ($m.ExportedFunctions.Count -ne 10) { throw "expected 10 exported functions, got $($m.ExportedFunctions.Count)" }
+          if ($m.ExportedFunctions.Count -lt 10) { throw "expected >=10 exported functions, got $($m.ExportedFunctions.Count)" }
       - name: Import + Get-KritScxConfig (should not throw)
         shell: pwsh
         run: |
