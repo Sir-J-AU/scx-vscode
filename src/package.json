@@ -1,0 +1,245 @@
+{
+  "name": "SCXCode",
+  "displayName": "Kritical SCXCode",
+  "description": "SCX in VS Code the Kritical way — chat + inline complete + model picker + auto-failover for MiniMax-M2.7 / MAGPiE / gpt-oss-120b / DeepSeek-V3.1 / coder / gemma-4 / Qwen3 / Llama-4-Maverick.",
+  "version": "0.1.0",
+  "publisher": "kritical",
+  "author": {
+    "name": "Joshua Finley",
+    "email": "joshua.finley@kritical.net"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Machine Learning",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "scx",
+    "chat",
+    "kritical",
+    "anthropic",
+    "claude",
+    "minimax",
+    "gpt-oss",
+    "deepseek",
+    "llm",
+    "completion"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kritical.scxcode.openChat",
+        "title": "Kritical: Open SCX Chat",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.pickModel",
+        "title": "Kritical: Pick SCX Model",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.testConnection",
+        "title": "Kritical: Test SCX Connection (ping /v1/messages)",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.showStatus",
+        "title": "Kritical: Show SCX Status (models / quota / fallback chain)",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.explainSelection",
+        "title": "Kritical: Explain Selected Code",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.refactorSelection",
+        "title": "Kritical: Refactor Selection (Kritical style)",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.auditDiff",
+        "title": "Kritical: Audit Current Diff vs CLAUDE.md HARD RULES",
+        "category": "Kritical SCXCode"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorHasSelection",
+          "command": "kritical.scxcode.explainSelection",
+          "group": "kritical@1"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "kritical.scxcode.refactorSelection",
+          "group": "kritical@2"
+        }
+      ],
+      "commandPalette": [
+        { "command": "kritical.scxcode.openChat", "when": "true" },
+        { "command": "kritical.scxcode.pickModel", "when": "true" },
+        { "command": "kritical.scxcode.testConnection", "when": "true" },
+        { "command": "kritical.scxcode.showStatus", "when": "true" }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kritical-scxcode",
+          "title": "Kritical SCXCode",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "kritical-scxcode": [
+        {
+          "type": "webview",
+          "id": "kritical.scxcode.chat",
+          "name": "Chat",
+          "icon": "$(comment-discussion)"
+        },
+        {
+          "id": "kritical.scxcode.status",
+          "name": "Status"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kritical SCXCode",
+      "properties": {
+        "kritical.scxcode.apiKey": {
+          "type": "string",
+          "default": "${env:SCX_API_KEY}",
+          "description": "SCX API key. Default reads HKCU env SCX_API_KEY (Kritical convention). Set explicitly to override.",
+          "markdownDescription": "SCX API key. **Default reads HKCU env `SCX_API_KEY`** (Kritical convention). Set explicitly here to override per-workspace. Never commit the resolved value.",
+          "scope": "application"
+        },
+        "kritical.scxcode.baseUrl": {
+          "type": "string",
+          "default": "https://api.scx.ai",
+          "description": "SCX API base URL. Change only if you point at a self-hosted SCX mirror.",
+          "scope": "application"
+        },
+        "kritical.scxcode.defaultModel": {
+          "type": "string",
+          "default": "MiniMax-M2.7",
+          "enum": [
+            "MiniMax-M2.7",
+            "MAGPiE",
+            "gpt-oss-120b",
+            "DeepSeek-V3.1",
+            "Meta-Llama-3.3-70B-Instruct",
+            "gemma-4-31B-it",
+            "Qwen3-32B",
+            "Llama-4-Maverick-17B-128E-Instruct",
+            "coder"
+          ],
+          "enumDescriptions": [
+            "230B sparse MoE (10B active) — default agentic pick, 192K ctx",
+            "117B MoE from scx.ai — near o4-mini reasoning, 131K ctx",
+            "117B open-weight MoE — cheapest reasoner, 131K ctx",
+            "671B MoE (37B active) — reserve for hardest problems, 131K ctx",
+            "70B dense — 405B-class perf, 131K ctx",
+            "Google Gemma 4 31B — multimodal + thinking-mode toggle, 131K ctx",
+            "Qwen3 32B dense — 119 languages, 32K ctx",
+            "Llama 4 Maverick 400B MoE — multimodal text+image, 131K ctx",
+            "SCX coder — highest context 196K, optimised for algorithms/debugging"
+          ],
+          "description": "Default model for chat + slash commands. Override per-message with /model or the picker."
+        },
+        "kritical.scxcode.autocompleteModel": {
+          "type": "string",
+          "default": "coder",
+          "enum": [
+            "coder",
+            "MiniMax-M2.7",
+            "gpt-oss-120b",
+            "gemma-4-31B-it",
+            "Qwen3-32B"
+          ],
+          "description": "Model for inline autocomplete. `coder` gives 196K ctx which fits large files."
+        },
+        "kritical.scxcode.fallbackChain": {
+          "type": "array",
+          "default": [
+            "MiniMax-M2.7",
+            "MAGPiE",
+            "gpt-oss-120b"
+          ],
+          "items": { "type": "string" },
+          "description": "Auto-failover chain on 429 / 5xx. Tries each in order. Empty array disables failover.",
+          "markdownDescription": "Auto-failover chain on **429 / 5xx**. Tries each in order. Set to `[]` to disable failover (single-model mode)."
+        },
+        "kritical.scxcode.autocompact": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["off", "auto", "aggressive"],
+          "enumDescriptions": [
+            "Never summarise — send full history until model context limit (may fail on long chats)",
+            "Summarise oldest turns when context reaches 75% (recommended)",
+            "Summarise more aggressively at 50% (better for long-lived chats)"
+          ],
+          "description": "How to compress chat history when the conversation approaches model context length."
+        },
+        "kritical.scxcode.systemPrompt": {
+          "type": "string",
+          "default": "You are a helpful coding assistant working inside VS Code. Prefer concise answers with code diffs. Never invent APIs — verify via docs first. When editing Kritical code, follow the HARD RULES in CLAUDE.md.",
+          "description": "System message prepended to every chat.",
+          "markdownDescription": "System message prepended to every chat. **Empty string disables** the default; be explicit."
+        },
+        "kritical.scxcode.telemetry": {
+          "type": "string",
+          "default": "off",
+          "enum": ["off", "local-only", "kritical-endpoint"],
+          "description": "Cost + latency telemetry. `off` = zero collection. `local-only` = writes to Kritical.SCXCode.log in workspace. `kritical-endpoint` = also POSTs to Kritical telemetry endpoint (requires opt-in HKCU var).",
+          "scope": "application"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild ./extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild ./extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "test": "node ./out/test/runTests.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sir-J-AU/scx-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Sir-J-AU/scx-vscode/issues"
+  },
+  "homepage": "https://kritical.net",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#13365C",
+    "theme": "dark"
+  },
+  "extensionKind": ["ui"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Extension reads SCX_API_KEY from HKCU env; safe. It does NOT execute untrusted workspace code. Chat + inline complete require trust because they can act on file contents."
+    }
+  }
+}

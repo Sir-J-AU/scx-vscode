@@ -45,18 +45,68 @@ code --install-extension RooVeterinaryInc.roo-cline        # Roo Code
 pwsh ./install/Install-KritScxVsCode.ps1 -Mode Install -Path Cline
 ```
 
-### Path C — Standalone Kritical SCX extension (future work, scaffold shipped)
+### Path C — Standalone Kritical extension `kritical.vscode.SCXCode`
 
-A minimal fork of Continue's provider layer packaged as
-`kritical.krit-scx-vscode`. Skeleton in `src/`. Not yet published; use
-Path A or B until this ships to marketplace.
+Real VS Code extension in `src/`:
 
-Goals for Path C beyond A/B:
-- Kritical branding (logo, colors #13365C primary + #F2B500 accent)
-- Autocompact toggle per HR .5165 (`SKIP_RADAR` / `SKIP_TOOLKIT_PREAMBLE` env
-  parity with the wave supervisor)
-- Hide models SCX doesn't accept (tier-based filter)
-- Fallback chain: SCX → Claude Code (native Max plan) → Codex → OpenRouter
+- **`src/package.json`** — full extension manifest (`kritical.SCXCode`),
+  7 commands, webview chat, activity-bar view container, 8 config properties
+  with enum descriptions
+- **`src/extension.ts`** — SCX HTTPS client with auto-failover across
+  `fallbackChain` on 429/5xx, webview chat UI (Kritical branding
+  `#13365C` + `#F2B500`), status bar, output channel, model picker
+- Build: `cd src && npm i && npm run build`
+- Install locally: `code --install-extension .` from `src/out/`
+- Publishing to OpenVSX + Microsoft marketplace: deferred until initial
+  operator smoke.
+
+### Path D — PowerShell module `Kritical.PS.SCXCode`
+
+Real PowerShell 7 module in `ps-module/`:
+
+- **`ps-module/Kritical.PS.SCXCode.psd1`** — module manifest v0.1.0,
+  Apache 2.0, tags for PSGallery
+- **`ps-module/Kritical.PS.SCXCode.psm1`** — 10 functions +
+  4 aliases (`scx`, `scx-chat`, `scx-models`, `scx-test`)
+- Live-verified: `Get-KritScxConfig` returns HKCU state; `Test-KritScxConnection`
+  probes `/v1/messages` in ~640ms
+
+```powershell
+# Local
+Import-Module ./ps-module/Kritical.PS.SCXCode.psd1
+Get-KritScxConfig
+Test-KritScxConnection
+Get-KritScxModels
+scx 'what is 47*3?'
+```
+
+### Path E — MCP server `kritical-scxcode`
+
+`mcp-server/server.mjs` — JSON-RPC 2.0 over stdio. 5 tools:
+`scx_chat` / `scx_list_models` / `scx_test` / `scx_embed` / `scx_status`.
+
+Register in Claude Desktop / Cline / Continue / any MCP-capable agent:
+
+```json
+{
+  "mcpServers": {
+    "kritical-scxcode": {
+      "command": "node",
+      "args": ["<path>/scx-vscode/mcp-server/server.mjs"],
+      "env": { "SCX_API_KEY": "${SCX_API_KEY}" }
+    }
+  }
+}
+```
+
+Live-verified: initialize + tools/list handshake return correct JSON-RPC responses.
+
+### Path C roadmap (still-to-build)
+
+- Kritical branding (logo, colours `#13365C` primary + `#F2B500` accent — already wired in webview)
+- Autocompact toggle env-parity with the wave supervisor (`SKIP_RADAR` / `SKIP_TOOLKIT_PREAMBLE`)
+- Hide models SCX doesn't accept (tier-based filter driven by `/v1/models`)
+- Extend fallback chain: SCX → Claude Code (native Max plan) → Codex → OpenRouter
 - Load-balancing across multiple SCX keys (ben-key + huzaifa-key)
 
 ## Kritical env-var convention (single source of truth)
