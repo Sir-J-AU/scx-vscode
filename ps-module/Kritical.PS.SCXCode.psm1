@@ -15,13 +15,23 @@
 function Get-KritScxConfig {
     <#
     .SYNOPSIS
-        Return the effective SCX config (key len, base URL, default model, fallback chain).
+        Return the effective SCX config (keys, base URL, default model, fallback chain).
+    .DESCRIPTION
+        Reads SCX_API_KEY (primary) + SCX_API_KEY_2..SCX_API_KEY_N (rotation pool)
+        from HKCU. Returns both the primary and the full ordered key list.
     .EXAMPLE
         Get-KritScxConfig
     #>
     [CmdletBinding()]
     param()
     $key = [Environment]::GetEnvironmentVariable('SCX_API_KEY', 'User')
+    # .5165e — multi-key rotation. Look up SCX_API_KEY_2 through SCX_API_KEY_9.
+    $keys = @()
+    if ($key) { $keys += $key }
+    for ($i = 2; $i -le 9; $i++) {
+        $k = [Environment]::GetEnvironmentVariable("SCX_API_KEY_$i", 'User')
+        if ($k -and $k -ne $key) { $keys += $k }
+    }
     $baseUrl = [Environment]::GetEnvironmentVariable('ANTHROPIC_BASE_URL', 'User')
     if (-not $baseUrl) { $baseUrl = 'https://api.scx.ai' }
     $default = [Environment]::GetEnvironmentVariable('KRIT_SCX_MODEL_DEFAULT', 'User')
@@ -32,6 +42,9 @@ function Get-KritScxConfig {
         HasKey        = [bool]$key
         KeyLength     = if ($key) { $key.Length } else { 0 }
         KeyPrefix     = if ($key -and $key.Length -ge 8) { $key.Substring(0, 8) } else { '' }
+        KeyCount      = $keys.Count
+        KeyPrefixes   = ($keys | ForEach-Object { if ($_.Length -ge 8) { $_.Substring(0, 8) } else { '(short)' } })
+        Keys          = $keys
         BaseUrl       = $baseUrl
         DefaultModel  = $default
         FallbackChain = $fallback
@@ -116,7 +129,9 @@ function Invoke-KritScx {
 function Invoke-KritScxChat {
     <#
     .SYNOPSIS
-        Send one user message, get plain-text reply. Auto-failover across FallbackChain on 429/5xx.
+        Send one user message, get plain-text reply. Two-dimensional failover:
+        (1) rotate SCX keys, (2) rotate models. On any 429/5xx, try next key first
+        with same model, then next model with the primary key, etc.
     .EXAMPLE
         Invoke-KritScxChat -Prompt 'what is 47*3?'
     #>
@@ -129,29 +144,35 @@ function Invoke-KritScxChat {
     )
     $cfg = Get-KritScxConfig
     if (-not $Model) { $Model = $cfg.DefaultModel }
-    $chain = @($Model) + @($cfg.FallbackChain | Where-Object { $_ -ne $Model })
+    $modelChain = @($Model) + @($cfg.FallbackChain | Where-Object { $_ -ne $Model })
+    $keyChain = if ($cfg.Keys.Count -gt 0) { $cfg.Keys } else { @($null) }
     $attempts = @()
     $lastErr = $null
-    foreach ($m in $chain) {
-        $attempts += $m
-        try {
-            $r = Invoke-KritScx -Model $m -Messages @(@{ role = 'user'; content = $Prompt }) -MaxTokens $MaxTokens -System:$System
-            $text = ($r.content | ForEach-Object { $_.text }) -join ''
-            return [pscustomobject]@{
-                Model      = $m
-                Text       = $text
-                InTokens   = $r.usage.input_tokens
-                OutTokens  = $r.usage.output_tokens
-                Attempts   = $attempts
-                Raw        = $r
+    # .5165e — key first, model second. Try each (key, model) pair in order.
+    foreach ($m in $modelChain) {
+        foreach ($k in $keyChain) {
+            $keyLabel = if ($k -and $k.Length -ge 8) { $k.Substring(0, 8) } else { '(default)' }
+            $attempts += "$m via $keyLabel"
+            try {
+                $r = Invoke-KritScx -Model $m -Messages @(@{ role = 'user'; content = $Prompt }) -MaxTokens $MaxTokens -System:$System -ApiKey $k
+                $text = ($r.content | ForEach-Object { $_.text }) -join ''
+                return [pscustomobject]@{
+                    Model      = $m
+                    KeyPrefix  = $keyLabel
+                    Text       = $text
+                    InTokens   = $r.usage.input_tokens
+                    OutTokens  = $r.usage.output_tokens
+                    Attempts   = $attempts
+                    Raw        = $r
+                }
+            } catch {
+                $lastErr = $_.TargetObject
+                if ($lastErr.IsRateLimit -or $lastErr.IsServerError) { continue }
+                throw $_
             }
-        } catch {
-            $lastErr = $_.TargetObject
-            if ($lastErr.IsRateLimit -or $lastErr.IsServerError) { continue }
-            throw $_
         }
     }
-    throw ("Failover chain exhausted (tried {0}): {1}" -f ($attempts -join ' -> '), $lastErr.Body)
+    throw ("Failover exhausted (tried {0}): {1}" -f ($attempts -join ' -> '), $lastErr.Body)
 }
 
 # ────────────────────────────────────────────────────────────────

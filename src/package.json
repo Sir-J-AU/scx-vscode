@@ -206,6 +206,25 @@
           "enum": ["off", "local-only", "kritical-endpoint"],
           "description": "Cost + latency telemetry. `off` = zero collection. `local-only` = writes to Kritical.SCXCode.log in workspace. `kritical-endpoint` = also POSTs to Kritical telemetry endpoint (requires opt-in HKCU var).",
           "scope": "application"
+        },
+        "kritical.scxcode.autoContext": {
+          "type": "string",
+          "default": "file+selection",
+          "enum": ["off", "file", "file+selection", "workspace-tree"],
+          "enumDescriptions": [
+            "No auto-context. Only the operator's prompt is sent.",
+            "Include active file path + language + ± 30-line cursor window.",
+            "Include file details + selection when non-empty (falls back to cursor window if no selection).",
+            "Also include workspace root name (adds ~50 tokens)."
+          ],
+          "description": "How much editor state to inject as a system-prefix on every chat/slash command. Costs a few hundred tokens per turn."
+        },
+        "kritical.scxcode.autoContextMaxChars": {
+          "type": "integer",
+          "default": 8000,
+          "minimum": 500,
+          "maximum": 50000,
+          "description": "Cap the auto-context code snippet at N characters (0.15 * tokens ratio → 8K chars ≈ 1.2K tokens)."
         }
       }
     }

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <!-- Kritical SCXCode marketplace icon. #13365C primary, #F2B500 accent. -->
+  <rect width="128" height="128" rx="18" fill="#13365C"/>
+  <!-- K monogram -->
+  <path d="M28 24 L28 104 L44 104 L44 72 L68 104 L88 104 L58 62 L86 24 L66 24 L44 54 L44 24 Z"
+        fill="#FFFFFF"/>
+  <!-- Accent bar -->
+  <rect x="24" y="112" width="80" height="4" rx="2" fill="#F2B500"/>
+  <!-- SCX dot cluster -->
+  <circle cx="98" cy="34" r="6" fill="#F2B500"/>
+  <circle cx="98" cy="54" r="4" fill="#F2B500" opacity="0.7"/>
+  <circle cx="98" cy="70" r="3" fill="#F2B500" opacity="0.5"/>
+</svg>

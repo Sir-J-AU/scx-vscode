@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  # Path C — VS Code extension build
+  # ────────────────────────────────────────────────────────────────
+  build-vscode-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install src/ deps
+        working-directory: src
+        run: npm install
+      - name: Build extension.ts
+        working-directory: src
+        run: npm run build
+      - name: Verify out/extension.js emitted
+        working-directory: src
+        run: test -s out/extension.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kritical-scxcode-vsix-source
+          path: src/
+
+  # ────────────────────────────────────────────────────────────────
+  # Path D — PowerShell module
+  # ────────────────────────────────────────────────────────────────
+  test-ps-module:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test-ModuleManifest
+        shell: pwsh
+        run: |
+          $m = Test-ModuleManifest -Path ./ps-module/Kritical.PS.SCXCode.psd1
+          Write-Host "name=$($m.Name) version=$($m.Version) exports=$($m.ExportedFunctions.Count)"
+          if ($m.ExportedFunctions.Count -ne 10) { throw "expected 10 exported functions, got $($m.ExportedFunctions.Count)" }
+      - name: Import + Get-KritScxConfig (should not throw)
+        shell: pwsh
+        run: |
+          Import-Module ./ps-module/Kritical.PS.SCXCode.psd1 -Force
+          $cfg = Get-KritScxConfig
+          Write-Host "HasKey=$($cfg.HasKey) BaseUrl=$($cfg.BaseUrl) DefaultModel=$($cfg.DefaultModel)"
+          if (-not $cfg.BaseUrl) { throw "config had no BaseUrl" }
+
+  # ────────────────────────────────────────────────────────────────
+  # Path E — MCP server
+  # ────────────────────────────────────────────────────────────────
+  test-mcp-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: MCP initialize + tools/list handshake
+        run: |
+          out=$(printf '%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | timeout 5 node mcp-server/server.mjs 2>&1)
+          echo "$out" | head -30
+          echo "$out" | grep -q '"protocolVersion":"2024-11-05"' || { echo "initialize handshake failed"; exit 1; }
+          echo "$out" | grep -q '"scx_chat"' || { echo "tools/list missing scx_chat"; exit 1; }
+          echo "$out" | grep -q '"scx_list_models"' || { echo "tools/list missing scx_list_models"; exit 1; }
+          echo "$out" | grep -q '"scx_test"' || { echo "tools/list missing scx_test"; exit 1; }
+          echo "$out" | grep -q '"scx_embed"' || { echo "tools/list missing scx_embed"; exit 1; }
+          echo "$out" | grep -q '"scx_status"' || { echo "tools/list missing scx_status"; exit 1; }
+
+  # ────────────────────────────────────────────────────────────────
+  # Path A — Continue config JSON validity
+  # ────────────────────────────────────────────────────────────────
+  test-continue-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse config-templates/continue-config.json
+        run: |
+          node -e "const j=JSON.parse(require('fs').readFileSync('config-templates/continue-config.json','utf8'));if(!Array.isArray(j.models))throw new Error('missing models[]');if(j.models.length<5)throw new Error('too few models seeded');if(!j.tabAutocompleteModel)throw new Error('missing tabAutocompleteModel');console.log('models=',j.models.length,'tabAutocomplete=',j.tabAutocompleteModel.model,'embed=',j.embeddingsProvider.model);"
+
+  # ────────────────────────────────────────────────────────────────
+  # Install scripts — parse-check + Status mode dry-run
+  # ────────────────────────────────────────────────────────────────
+  test-install-scripts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse-check + PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery
+          }
+          $findings = Invoke-ScriptAnalyzer -Path ./install/ -Recurse -Severity Error
+          if ($findings) {
+            $findings | Format-Table -AutoSize
+            throw "PSScriptAnalyzer found $($findings.Count) error-severity issues"
+          }
+          Write-Host "PSScriptAnalyzer clean"

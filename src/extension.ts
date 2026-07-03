@@ -32,8 +32,17 @@ interface ScxCompletionResponse {
 function getConfig() {
   const c = vscode.workspace.getConfiguration('kritical.scxcode');
   // VS Code auto-substitutes ${env:SCX_API_KEY} for the apiKey default.
+  const primary = c.get<string>('apiKey', '').replace(/^\$\{env:SCX_API_KEY\}$/, process.env.SCX_API_KEY ?? '');
+  // .5165e — multi-key rotation. Look up SCX_API_KEY_2..SCX_API_KEY_9.
+  const keys: string[] = [];
+  if (primary) keys.push(primary);
+  for (let i = 2; i <= 9; i++) {
+    const k = process.env[`SCX_API_KEY_${i}`];
+    if (k && !keys.includes(k)) keys.push(k);
+  }
   return {
-    apiKey: c.get<string>('apiKey', '').replace(/^\$\{env:SCX_API_KEY\}$/, process.env.SCX_API_KEY ?? ''),
+    apiKey: primary,
+    apiKeys: keys,
     baseUrl: c.get<string>('baseUrl', 'https://api.scx.ai'),
     defaultModel: c.get<string>('defaultModel', 'MiniMax-M2.7'),
     autocompleteModel: c.get<string>('autocompleteModel', 'coder'),
@@ -41,16 +50,65 @@ function getConfig() {
     autocompact: c.get<'off' | 'auto' | 'aggressive'>('autocompact', 'auto'),
     systemPrompt: c.get<string>('systemPrompt', ''),
     telemetry: c.get<'off' | 'local-only' | 'kritical-endpoint'>('telemetry', 'off'),
+    // .5165e — auto-context wiring
+    autoContext: c.get<'off' | 'file' | 'file+selection' | 'workspace-tree'>('autoContext', 'file+selection'),
+    autoContextMaxChars: c.get<number>('autoContextMaxChars', 8000),
   };
+}
+
+// .5165e — auto-context builder. Injects active editor file + selection + cursor
+// info as a system-prefix so the model gets "where the operator is looking".
+function buildAutoContext(): string {
+  const cfg = getConfig();
+  if (cfg.autoContext === 'off') return '';
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return '';
+  const doc = editor.document;
+  const relPath = vscode.workspace.asRelativePath(doc.uri, false);
+  const lang = doc.languageId;
+  const totalLines = doc.lineCount;
+  const sel = editor.selection;
+  const parts: string[] = [];
+  parts.push(`## Auto-context (kritical.scxcode)`);
+  parts.push(`- Active file: \`${relPath}\` (${lang}, ${totalLines} lines)`);
+  if (!sel.isEmpty) {
+    const selText = doc.getText(sel);
+    parts.push(`- Selection: lines ${sel.start.line + 1}-${sel.end.line + 1} (${selText.length} chars)`);
+    parts.push('```' + lang);
+    parts.push(selText.slice(0, Math.min(selText.length, cfg.autoContextMaxChars)));
+    parts.push('```');
+  } else {
+    parts.push(`- Cursor: line ${sel.active.line + 1}, col ${sel.active.character + 1} (no selection)`);
+    if (cfg.autoContext === 'file' || cfg.autoContext === 'file+selection') {
+      // Include a small window around the cursor (± 30 lines)
+      const start = Math.max(0, sel.active.line - 30);
+      const end = Math.min(totalLines - 1, sel.active.line + 30);
+      const range = new vscode.Range(start, 0, end, doc.lineAt(end).range.end.character);
+      const snippet = doc.getText(range);
+      parts.push(`- Cursor window: lines ${start + 1}-${end + 1}`);
+      parts.push('```' + lang);
+      parts.push(snippet.slice(0, cfg.autoContextMaxChars));
+      parts.push('```');
+    }
+  }
+  if (cfg.autoContext === 'workspace-tree') {
+    // Add top-level workspace tree (files only, up to 40 entries)
+    const wsRoot = vscode.workspace.workspaceFolders?.[0];
+    if (wsRoot) {
+      parts.push(`- Workspace root: \`${wsRoot.name}\``);
+    }
+  }
+  return parts.join('\n') + '\n\n';
 }
 
 // ────────────────────────────────────────────────────────────────
 // SCX API — Anthropic-shape POST with fetch fallback via https.request
 // ────────────────────────────────────────────────────────────────
 
-async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800): Promise<ScxCompletionResponse> {
+async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, keyOverride: string | null = null): Promise<ScxCompletionResponse> {
   const { apiKey, baseUrl, systemPrompt } = getConfig();
-  if (!apiKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
+  const useKey = keyOverride || apiKey;
+  if (!useKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
   const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens };
   if (systemPrompt) body.system = systemPrompt;
 
@@ -61,7 +119,7 @@ async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800): 
       hostname: url.hostname,
       path: url.pathname,
       headers: {
-        'x-api-key': apiKey,
+        'x-api-key': useKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
@@ -91,26 +149,32 @@ class ScxHttpError extends Error {
   get isServerError() { return this.status >= 500; }
 }
 
-// Failover: try model, on 429/5xx walk the chain.
-async function scxPostWithFailover(messages: ScxMessage[], maxTokens = 800): Promise<{ res: ScxCompletionResponse; modelUsed: string; attempts: string[] }> {
+// Failover: rotate SCX keys first (same daily-limit → different quotas),
+// then rotate models. On 429/5xx walk the (model, key) grid.
+async function scxPostWithFailover(messages: ScxMessage[], maxTokens = 800): Promise<{ res: ScxCompletionResponse; modelUsed: string; keyIndex: number; attempts: string[] }> {
   const cfg = getConfig();
   const tried: string[] = [];
-  const chain = [cfg.defaultModel, ...cfg.fallbackChain.filter((m) => m !== cfg.defaultModel)];
+  const modelChain = [cfg.defaultModel, ...cfg.fallbackChain.filter((m) => m !== cfg.defaultModel)];
+  const keys = cfg.apiKeys.length > 0 ? cfg.apiKeys : [cfg.apiKey];
   let lastErr: unknown;
-  for (const model of chain) {
-    tried.push(model);
-    try {
-      const res = await scxPost(model, messages, maxTokens);
-      return { res, modelUsed: model, attempts: tried };
-    } catch (e) {
-      lastErr = e;
-      if (e instanceof ScxHttpError && (e.isRateLimit || e.isServerError)) {
-        continue; // try next model
+  for (const model of modelChain) {
+    for (let ki = 0; ki < keys.length; ki++) {
+      const k = keys[ki];
+      const label = `${model}${keys.length > 1 ? ` (key${ki + 1})` : ''}`;
+      tried.push(label);
+      try {
+        const res = await scxPost(model, messages, maxTokens, k);
+        return { res, modelUsed: model, keyIndex: ki + 1, attempts: tried };
+      } catch (e) {
+        lastErr = e;
+        if (e instanceof ScxHttpError && (e.isRateLimit || e.isServerError)) {
+          continue; // try next (model, key)
+        }
+        throw e; // non-transient error — surface immediately
       }
-      throw e; // non-transient error — surface immediately
     }
   }
-  throw lastErr ?? new Error('failover chain exhausted (unknown reason)');
+  throw lastErr ?? new Error('failover exhausted (unknown reason)');
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -212,11 +276,17 @@ async function cmdAuditDiff() {
 async function runChat(prompt: string) {
   const out = vscode.window.createOutputChannel('Kritical SCXCode');
   out.show(true);
+  // .5165e — auto-context prefix. Editor state gets injected as a system-prefix
+  // block so the model knows what the operator is looking at.
+  const ctx = buildAutoContext();
+  const fullPrompt = ctx ? ctx + prompt : prompt;
   out.appendLine(`\n[chat] ${prompt.slice(0, 100)}${prompt.length > 100 ? '…' : ''}`);
+  if (ctx) out.appendLine(`[auto-context] ${ctx.length} chars injected`);
   try {
-    const { res, modelUsed } = await scxPostWithFailover([{ role: 'user', content: prompt }], 1500);
+    const { res, modelUsed, keyIndex } = await scxPostWithFailover([{ role: 'user', content: fullPrompt }], 1500);
     const text = res.content.map((c) => c.text).join('');
-    out.appendLine(`\n[reply · ${modelUsed} · ${res.usage.output_tokens} tok]\n${text}\n`);
+    const keyLabel = keyIndex > 1 ? ` · key${keyIndex}` : '';
+    out.appendLine(`\n[reply · ${modelUsed}${keyLabel} · ${res.usage.output_tokens} tok]\n${text}\n`);
   } catch (e) {
     out.appendLine(`[error] ${(e as Error).message}`);
   }

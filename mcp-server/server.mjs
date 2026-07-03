@@ -28,6 +28,13 @@ import https from 'node:https';
 
 const SCX_BASE = process.env.ANTHROPIC_BASE_URL || 'https://api.scx.ai';
 const SCX_KEY = process.env.SCX_API_KEY;
+// .5165e — multi-key rotation pool
+const SCX_KEYS = [];
+if (SCX_KEY) SCX_KEYS.push(SCX_KEY);
+for (let i = 2; i <= 9; i++) {
+  const k = process.env[`SCX_API_KEY_${i}`];
+  if (k && !SCX_KEYS.includes(k)) SCX_KEYS.push(k);
+}
 const DEFAULT_MODEL = process.env.KRIT_SCX_MODEL_DEFAULT || 'MiniMax-M2.7';
 const FALLBACK_CHAIN = (process.env.KRIT_SCX_FALLBACK_CHAIN || 'MiniMax-M2.7,MAGPiE,gpt-oss-120b').split(',').map(s => s.trim());
 
@@ -37,16 +44,17 @@ function log(msg) { process.stderr.write(`[scxcode-mcp] ${msg}\n`); }
 // SCX HTTP
 // ────────────────────────────────────────────────────────────────
 
-function scxPost(path, body) {
+function scxPost(path, body, keyOverride = null) {
   return new Promise((resolve, reject) => {
-    if (!SCX_KEY) return reject(new Error('SCX_API_KEY not set (need HKCU env or MCP env)'));
+    const useKey = keyOverride || SCX_KEY;
+    if (!useKey) return reject(new Error('SCX_API_KEY not set (need HKCU env or MCP env)'));
     const url = new URL(path, SCX_BASE);
     const req = https.request({
       method: 'POST',
       hostname: url.hostname,
       path: url.pathname,
       headers: {
-        'x-api-key': SCX_KEY,
+        'x-api-key': useKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
       },
@@ -85,18 +93,26 @@ function scxGet(path) {
 }
 
 async function chatWithFailover(messages, maxTokens = 1200, preferredModel = null) {
-  const chain = [preferredModel || DEFAULT_MODEL, ...FALLBACK_CHAIN.filter(m => m !== (preferredModel || DEFAULT_MODEL))];
+  const modelChain = [preferredModel || DEFAULT_MODEL, ...FALLBACK_CHAIN.filter(m => m !== (preferredModel || DEFAULT_MODEL))];
+  const keys = SCX_KEYS.length ? SCX_KEYS : [null];
   let lastErr;
   const attempts = [];
-  for (const m of chain) {
-    attempts.push(m);
-    try {
-      const r = await scxPost('/v1/messages', { model: m, messages, max_tokens: maxTokens });
-      return { ...r, _model: m, _attempts: attempts };
-    } catch (e) {
-      lastErr = e;
-      if (e.status === 429 || e.status >= 500) continue;
-      throw e;
+  // .5165e — walk (model, key) pairs. Key rotation is faster than model
+  // rotation because different keys often have separate daily quotas but the
+  // same model catalog.
+  for (const m of modelChain) {
+    for (let ki = 0; ki < keys.length; ki++) {
+      const k = keys[ki];
+      const label = `${m}${k ? '/key' + (ki + 1) : ''}`;
+      attempts.push(label);
+      try {
+        const r = await scxPost('/v1/messages', { model: m, messages, max_tokens: maxTokens }, k);
+        return { ...r, _model: m, _key: ki + 1, _attempts: attempts };
+      } catch (e) {
+        lastErr = e;
+        if (e.status === 429 || e.status >= 500) continue;
+        throw e;
+      }
     }
   }
   throw new Error(`failover exhausted (${attempts.join(' -> ')}): ${lastErr?.body || lastErr?.message}`);
