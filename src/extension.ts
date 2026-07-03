@@ -93,13 +93,25 @@ function resolveClaudeCliPath(configured: string): string {
 // (no API key needed). Invokes `claude --print --output-format text <prompt>`.
 async function askClaudeCodeCli(prompt: string, systemPrompt: string): Promise<string> {
   const cfg = getConfig();
-  const fullPrompt = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
   const resolvedPath = resolveClaudeCliPath(cfg.claudeCliPath);
+  // Run claude CLI from a trusted cwd (USERPROFILE) so workspace-trust-dialog
+  // prompts don't stall the spawn — extension host cwd is otherwise the open
+  // workspace which may not be trusted for claude-code yet.
+  const safeCwd = process.env.USERPROFILE || process.env.HOME || undefined;
+  const args = ['--print', '--output-format', 'text'];
+  if (systemPrompt) { args.push('--append-system-prompt', systemPrompt); }
+  args.push(prompt);
+  // On Windows, shell:true concatenates args without escaping (DEP0190) so
+  // spaces in system-prompt / prompt get split. Quote each arg ourselves and
+  // pass the whole thing as a single command string via shell.
+  const useShell = process.platform === 'win32';
+  const quotedCmd = useShell
+    ? [resolvedPath, ...args].map((a) => `"${String(a).replace(/"/g, '\\"')}"`).join(' ')
+    : '';
   return new Promise((resolve, reject) => {
-    const child = spawn(resolvedPath, ['--print', '--output-format', 'text', fullPrompt], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32', // .cmd shim on Windows
-    });
+    const child = useShell
+      ? spawn(quotedCmd, { stdio: ['ignore', 'pipe', 'pipe'], shell: true, cwd: safeCwd })
+      : spawn(resolvedPath, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: safeCwd });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (c) => (stdout += c));
@@ -109,11 +121,11 @@ async function askClaudeCodeCli(prompt: string, systemPrompt: string): Promise<s
       if (code === 0) resolve(stdout.trim());
       else reject(new Error(`claude CLI exit=${code}: ${stderr.slice(0, 500) || stdout.slice(0, 500)}`));
     });
-    // 90 s cap so a hung claude subprocess doesn't freeze the chat view
+    // 180 s cap — first spawn on cold session can be slow (Claude Code startup + workspace-scan)
     setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      reject(new Error('claude CLI timeout after 90s'));
-    }, 90_000);
+      reject(new Error('claude CLI timeout after 180s'));
+    }, 180_000);
   });
 }
 
