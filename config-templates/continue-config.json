@@ -1,0 +1,114 @@
+{
+  "$comment_1": "Kritical SCX config for Continue.dev extension. Copy to %USERPROFILE%\\.continue\\config.json (Install-KritScxVsCode.ps1 does this).",
+  "$comment_2": "Env vars {{env.SCX_API_KEY}} are read at Continue runtime from HKCU. Never commit the resolved value.",
+  "$comment_3": "SCX endpoint accepts anthropic-version header (verified 2026-07-03 with MiniMax-M2.7 returning valid Anthropic-shape response).",
+
+  "models": [
+    {
+      "title": "SCX · MiniMax-M2.7 (default agentic, 192K ctx, ~AUD $0.68/1M in + $3.20/1M out)",
+      "provider": "anthropic",
+      "model": "MiniMax-M2.7",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 192000,
+      "template": "chatml",
+      "systemMessage": "You are a helpful coding assistant. Prefer concise answers with code diffs. Never invent APIs — verify via docs first."
+    },
+    {
+      "title": "SCX · MAGPiE (117B MoE, 131K ctx, ~AUD $0.75/1M in + $1.75/1M out)",
+      "provider": "anthropic",
+      "model": "MAGPiE",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 131072
+    },
+    {
+      "title": "SCX · gpt-oss-120b (near-o4-mini reasoning, 131K ctx, ~AUD $0.30/1M in + $0.98/1M out)",
+      "provider": "anthropic",
+      "model": "gpt-oss-120b",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 131072
+    },
+    {
+      "title": "SCX · DeepSeek-V3.1 (671B MoE, 128K ctx, ~AUD $4.50/1M in + $7.25/1M out — reserve for hard problems)",
+      "provider": "anthropic",
+      "model": "DeepSeek-V3.1",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 131072
+    },
+    {
+      "title": "SCX · coder (196K ctx, ~AUD $0.85/1M in + $3.75/1M out — optimized for algorithms/debugging)",
+      "provider": "anthropic",
+      "model": "coder",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 196608
+    },
+    {
+      "title": "SCX · Qwen3-32B (32K ctx, 119 languages, ~AUD $0.65/1M in + $1.55/1M out)",
+      "provider": "anthropic",
+      "model": "Qwen3-32B",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 32768
+    },
+    {
+      "title": "SCX · Llama-4-Maverick-17B-128E (multimodal text+image, 131K ctx, ~AUD $0.95/1M in + $2.90/1M out)",
+      "provider": "anthropic",
+      "model": "Llama-4-Maverick-17B-128E-Instruct",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 131072
+    },
+    {
+      "title": "SCX · gemma-4-31B-it (text+image, thinking-mode toggle, 131K ctx, ~AUD $0.54/1M in + $1.63/1M out)",
+      "provider": "anthropic",
+      "model": "gemma-4-31B-it",
+      "apiKey": "{{env.SCX_API_KEY}}",
+      "apiBase": "https://api.scx.ai",
+      "contextLength": 131072
+    }
+  ],
+
+  "tabAutocompleteModel": {
+    "title": "SCX · coder (autocomplete)",
+    "provider": "anthropic",
+    "model": "coder",
+    "apiKey": "{{env.SCX_API_KEY}}",
+    "apiBase": "https://api.scx.ai"
+  },
+
+  "embeddingsProvider": {
+    "provider": "openai",
+    "model": "E5-Mistral-7B-Instruct",
+    "apiKey": "{{env.SCX_API_KEY}}",
+    "apiBase": "https://api.scx.ai/v1"
+  },
+
+  "customCommands": [
+    {
+      "name": "explain",
+      "prompt": "Explain the highlighted code in plain English. Structure: (1) what it does, (2) what it depends on, (3) what breaks if a caller misuses it. Cite concrete file:line references.",
+      "description": "Human explanation of highlighted code"
+    },
+    {
+      "name": "krit-refactor",
+      "prompt": "Refactor the highlighted code following Kritical conventions: PascalCase for AL identifiers, kebab-case for JS filenames, kr-<scope>-<element> for CSS classes. Never introduce new abstractions unless they save at least 3 duplicate patterns.",
+      "description": "Refactor per Kritical style guide"
+    },
+    {
+      "name": "audit-my-change",
+      "prompt": "Audit the CURRENT git diff against the Kritical HARD RULES from CLAUDE.md (never commit .env / real tokens / secrets; no bulk restore; no supervisor cross-invoke; test-dryrun before live). Emit REFUSED/OK per rule with one-line reason.",
+      "description": "Pre-commit safety pass"
+    }
+  ],
+
+  "allowAnonymousTelemetry": false,
+  "disableIndexing": false,
+
+  "$comment_krit_1": "Autocompact = Continue's 'compaction' feature — enabled by default. When context nears the model contextLength, Continue summarizes older turns automatically. Disable per-conversation if you need full history via /compact off.",
+  "$comment_krit_2": "Model picker: click the model name at the bottom of the Continue chat panel to switch. Or /model MiniMax-M2.7 in chat.",
+  "$comment_krit_3": "Fallback: Continue does NOT auto-failover across models. Path C standalone extension is where load-balance + fallback lands. For now, if SCX 429s: click a different model in picker."
+}
