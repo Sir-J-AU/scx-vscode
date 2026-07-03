@@ -1,22 +1,25 @@
-# Contributing to scx-vscode
+# Contributing to Kritical.SCXCode
 
 Thanks for looking. This repo powers the Kritical SCX ecosystem across
-5 deployment paths (Continue.dev config / Cline+Roo docs / VS Code extension /
-PowerShell module / MCP server). Contribution style follows the same
-Kritical HR16 discipline that runs the Pax8 supervisor.
+five deployment surfaces — the VS Code extension, a Continue.dev config
+template, Cline / Roo docs, a PowerShell 7 module, and an MCP server.
+The guidance below keeps the contribution surface tidy.
 
 ## Ground rules
 
-1. **Never commit API keys / tokens / .env files.** Secrets live in HKCU (per
-   Kritical convention). If you find a real secret in a diff, stop and rotate.
-2. **Never bulk-restore whole files from git** (`git checkout <sha> -- <path>`).
-   Semantic diff peak-vs-HEAD; cherry-pick only the piece belonging in the
-   target file. See [memory pin `diff-not-bulk-restore`](README.md).
-3. **HR16 install-script contract**: any script mutating external state
-   (extension install, HKCU env, config drop) MUST expose
-   `-Mode Install|Remove|Heal|Status`. Reference: `install/Install-KritScxVsCode.ps1`.
-4. **Live-verify before shipping**. If you claim "works", the PR body includes
-   the receipt (JSON output under `receipts/`) or a captured log line as proof.
+1. **Never commit API keys, tokens, or `.env` files.** Secrets live in
+   `HKCU` by convention. If you find a real secret in a diff, stop and
+   rotate.
+2. **Never bulk-restore whole files from git**
+   (`git checkout <sha> -- <path>`). Semantic diff peak-vs-HEAD;
+   cherry-pick only the piece belonging in the target file.
+3. **Idempotent installer contract.** Any script that mutates external
+   state (extension install, `HKCU` env, config drop) exposes
+   `-Mode Install | Remove | Heal | Status`. Reference:
+   `install/Install-KritScxVsCode.ps1`.
+4. **Live-verify before shipping.** If you claim it works, include the
+   receipt (`receipts/*.json`) or a captured log line as evidence in the
+   PR body.
 
 ## Local dev
 
@@ -95,14 +98,14 @@ Contributions welcome to seed each of these.
 
 ## Commit style
 
-Kritical convention: `<type>(.<wave>): <imperative summary>` where wave = the
-Kritical wave number that spawned the change (or `HEAD` for unqueued work).
+Conventional commits: `<type>: <imperative summary>` where type is one
+of `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `perf`.
 
 Examples:
 
-- `feat(.5170): add Kritical.SCXCode marketplace listing`
-- `fix(.5165c): load-balance skips penalty-boxed provider on next attempt`
-- `docs(HEAD): correct SCX MiniMax-M2.7 context-length in docs/PROVIDERS.md`
+- `feat: add Kritical.SCXCode marketplace listing`
+- `fix: load-balance skips penalty-boxed provider on next attempt`
+- `docs: correct SCX MiniMax-M2.7 context length in docs/PROVIDERS.md`
 
 Keep commit subjects professional — no profanity, no personal quotes.
 

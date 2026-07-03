@@ -1,10 +1,12 @@
-# OSS universe catalog — what scx-vscode reuses / glues / embeds
+# OSS universe catalog — what Kritical.SCXCode reuses, glues, and embeds
 
-> **Operator .5165 mandate**: "find the whole universe of oss/community packages
-> that make up the plugin and suck them all in and rapidly glue together with
-> any and all required testing."
+> This catalogue records the open-source and community packages that
+> Kritical.SCXCode either embeds, glues to, or has evaluated and passed
+> on. It exists so future contributors can see at a glance which pieces
+> of the wider ecosystem this extension leans on, and which it
+> intentionally does not.
 >
-> **Per-package verdict**: EMBED-NOW (bundled in scx-vscode) / EMBED-LATER
+> **Per-package verdict**: EMBED-NOW (bundled in Kritical.SCXCode) / EMBED-LATER
 > (queued) / KEEP-EYES-ON (evaluated, not yet needed) / REUSE-AS-DEP (declared
 > as npm/PSGallery dep, not vendored) / IRRELEVANT (evaluated, rejected).
 >
@@ -78,7 +80,7 @@ Located at `mcp-server/server.mjs`. Exposes 5 tools:
 
 ## §D — Kritical PowerShell already-published ecosystem (from CLAUDE.md §PUBLISHED PACKAGE INDEX)
 
-| Package | Version | PSGallery | Purpose | Fits scx-vscode? |
+| Package | Version | PSGallery | Purpose | Fits Kritical.SCXCode? |
 |---|---|:---:|---|---|
 | **Krit.OmniFramework** | 1.1.14 | ✅ | Kritical PowerShell foundation (auto-loads PSFramework + PSSharedGoods + PSWriteHTML + ImportExcel). | Path C `Kritical.PS.SCXCode` declares `ExternalModuleDependencies = @('Krit.OmniFramework')` per the resilience pattern (memory pin per `KRTPax8ToShopifyConnector` CLAUDE.md). |
 | **Krit.Pax8Mcp** | 1.0.0 | ✅ | Multi-agent Pax8 MCP wiring pattern. | **Reference pattern for our own MCP wiring**. |

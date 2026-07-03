@@ -1,4 +1,4 @@
-# scx-vscode — architecture
+# Kritical.SCXCode — architecture
 
 ## The three paths, side by side
 
@@ -114,12 +114,12 @@ land in Path C when the settings-file location on Windows is confirmed.
 - Hide models that don't accept the current key tier
 - Local telemetry log for cost-per-day per model per user
 
-**Reuse plan** (per operator .5165: "reuse as much as is out there"):
+**Reuse plan** — reuse as much of the existing open-source ecosystem as sensible:
 - Fork Continue's `core/llm/providers` layer (Apache 2.0 — attribution retained)
 - Fork Continue's chat panel React tree
 - Add Kritical brand wrapper (StatusBarItem, chat panel header logo)
 - Add fallback middleware in the provider dispatch
-- Package as `kritical.krit-scx-vscode` on OpenVSX (avoids Microsoft marketplace
+- Package as `kritical.scxcode` on OpenVSX (avoids Microsoft marketplace
   attribution paperwork initially)
 
 **Not yet built**. `src/` is empty. Continue-based Path A is the actionable

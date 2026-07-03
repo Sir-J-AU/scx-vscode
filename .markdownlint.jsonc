@@ -1,0 +1,26 @@
+// Kritical.SCXCode markdownlint config.
+// Optimised for humans reading the raw Markdown, not for the strictest
+// linter defaults.  GitHub renders inline HTML and both table styles fine;
+// we prefer padded tables and inline `<div align="center">` blocks for
+// badge / footer layout.
+{
+  "default": true,
+
+  // Padded table style — `| A | B |` — is easier to read than the compact
+  // `|A|B|` style.  Disable the "pick one" rule so both are accepted.
+  "MD060": false,
+
+  // Allow the small amount of inline HTML we use for centred badge blocks
+  // and footer typography.
+  "MD033": false,
+
+  // Allow lines longer than 80 chars.  Wrapping fights how GitHub renders
+  // content and hurts screen-reader flow.
+  "MD013": false,
+
+  // Allow the same heading text to appear in sibling sections.
+  "MD024": { "siblings_only": true },
+
+  // Bare autolinks are valid HTML and render fine.
+  "MD034": false
+}
