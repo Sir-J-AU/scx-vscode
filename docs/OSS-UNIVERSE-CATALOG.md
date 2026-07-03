@@ -117,8 +117,8 @@ Located at `mcp-server/server.mjs`. Exposes 5 tools:
 
 ## §H — What we're deliberately NOT embedding
 
-- **Anthropic API key path** — Kritical HARD RULE 20 forbids any Anthropic API key. Only native Max plan (claude.exe) is allowed. SCX is exempt because SCX billing is native to operator's SCX plan.
-- **OpenAI API key path** — same rule. No API keys for OpenAI. Only Codex CLI native ChatGPT Plus/Pro.
+- **Anthropic API key path** — deliberately not embedded. Claude access is exclusively via the native Claude Max plan (through the `claude.exe` CLI). SCX is separately embedded because SCX billing is native to the operator's SCX plan.
+- **OpenAI API key path** — same posture. OpenAI access is exclusively via the native Codex CLI on a ChatGPT Plus / Pro plan. No API keys.
 - **Cursor / Windsurf** — closed forks of VS Code. Uses their own IDE, not ours.
 - **Copilot** — proprietary Microsoft, not reusable.
 

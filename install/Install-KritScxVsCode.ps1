@@ -73,9 +73,9 @@ function Remove-HkcuVar([string]$name) {
     return 'REMOVED'
 }
 
-function Test-CodeExtension([string]$id) {
+function Test-CodeExtension([string]$id, [string]$CodeExe = 'code') {
     try {
-        $exts = & code --list-extensions 2>$null
+        $exts = & $CodeExe --list-extensions 2>$null
         return ($exts -contains $id)
     } catch { return $false }
 }
@@ -97,15 +97,43 @@ function Invoke-InstallContinue {
     $results['HKCU_ANTHROPIC_BASE_URL']     = Set-HkcuVar 'ANTHROPIC_BASE_URL' 'https://api.scx.ai'
     $results['HKCU_KRIT_SCX_MODEL_DEFAULT'] = Set-HkcuVar 'KRIT_SCX_MODEL_DEFAULT' $DefaultModel
 
-    # 3. Continue installed?
-    if (-not (Get-Command code -ErrorAction SilentlyContinue)) {
-        $results['ContinueExt'] = 'SKIP: code CLI not on PATH — install Continue manually then re-run'
-    } elseif (Test-CodeExtension 'continue.continue') {
-        $results['ContinueExt'] = 'ALREADY-INSTALLED: continue.continue'
+    # 3. Continue installed? (.5165h — detect stable + Insiders, prefer whichever is on PATH)
+    $codeExe = $null
+    foreach ($cand in 'code', 'code-insiders') {
+        if (Get-Command $cand -ErrorAction SilentlyContinue) { $codeExe = $cand; break }
+    }
+    # Fall back to known install paths if not on PATH
+    if (-not $codeExe) {
+        $candidates = @(
+            "$env:LOCALAPPDATA\Programs\Microsoft VS Code Insiders\bin\code-insiders.cmd",
+            "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd",
+            "${env:ProgramFiles}\Microsoft VS Code\bin\code.cmd"
+        )
+        foreach ($c in $candidates) {
+            if (Test-Path $c) { $codeExe = $c; break }
+        }
+    }
+    if (-not $codeExe) {
+        $results['ContinueExt'] = 'SKIP: no VS Code (stable or Insiders) found — install manually then re-run'
     } else {
-        Write-Host '  installing continue.continue via code --install-extension...'
-        & code --install-extension continue.continue | Out-Null
-        $results['ContinueExt'] = 'INSTALLED'
+        $results['CodeFlavor'] = "$codeExe"
+        if (Test-CodeExtension 'continue.continue' -CodeExe $codeExe) {
+            $results['ContinueExt'] = "ALREADY-INSTALLED: continue.continue (via $(Split-Path -Leaf $codeExe))"
+        } else {
+            Write-Host "  installing continue.continue via $codeExe --install-extension..."
+            & $codeExe --install-extension continue.continue | Out-Null
+            $results['ContinueExt'] = "INSTALLED via $(Split-Path -Leaf $codeExe)"
+        }
+        # .5165h — also install the Kritical SCXCode VSIX itself if present in repo
+        $vsix = Get-ChildItem (Join-Path $script:RepoRoot 'src\SCXCode-*.vsix') -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending | Select-Object -First 1
+        if ($vsix) {
+            Write-Host "  installing $($vsix.Name) via $codeExe --install-extension..."
+            & $codeExe --install-extension $vsix.FullName | Out-Null
+            $results['SCXCodeVsix'] = "INSTALLED: $($vsix.Name) via $(Split-Path -Leaf $codeExe)"
+        } else {
+            $results['SCXCodeVsix'] = 'SKIP: no VSIX found in src/ — build first via npx vsce package'
+        }
     }
 
     # 4. Drop config template with backup

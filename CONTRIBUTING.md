@@ -104,8 +104,7 @@ Examples:
 - `fix(.5165c): load-balance skips penalty-boxed provider on next attempt`
 - `docs(HEAD): correct SCX MiniMax-M2.7 context-length in docs/PROVIDERS.md`
 
-Never include profanity / operator quotes with profanity in commit subjects
-per Kritical HARD RULE 20.
+Keep commit subjects professional — no profanity, no personal quotes.
 
 ## Sign-off
 
