@@ -2,7 +2,7 @@
   "name": "SCXCode",
   "displayName": "Kritical SCXCode",
   "description": "SCX in VS Code the Kritical way — chat + inline complete + model picker + auto-failover for MiniMax-M2.7 / MAGPiE / gpt-oss-120b / DeepSeek-V3.1 / coder / gemma-4 / Qwen3 / Llama-4-Maverick.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "kritical",
   "author": {
     "name": "Joshua Finley",
@@ -41,7 +41,11 @@
       {
         "command": "kritical.scxcode.openChat",
         "title": "Kritical: Open SCX Chat",
-        "category": "Kritical SCXCode"
+        "category": "Kritical SCXCode",
+        "icon": {
+          "light": "media/kritical-symbol.png",
+          "dark": "media/kritical-symbol.png"
+        }
       },
       {
         "command": "kritical.scxcode.pickModel",
@@ -75,6 +79,13 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "kritical.scxcode.openChat",
+          "group": "navigation@99",
+          "when": "true"
+        }
+      ],
       "editor/context": [
         {
           "when": "editorHasSelection",
