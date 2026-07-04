@@ -46,7 +46,7 @@ Remove-Item $tmp -EA SilentlyContinue
 
 # (d) synthesiser — merge shard summaries into one answer
 $merged = ($summaries | ForEach-Object { "[$($_.source_ref)] $($_.content)" }) -join "`n`n"
-$synthBody = @{ model=$Model; max_tokens=500; temperature=0.2; messages=@(@{role='user';content="Task: $Task`n`nBelow are per-source summaries. Synthesise ONE coherent answer to the task, weaving them together and citing sources by [ref]. Summaries:`n`n$merged"}) } | ConvertTo-Json -Depth 6
+$synthBody = @{ model=$Model; max_tokens=1500; temperature=0.2; messages=@(@{role='user';content="Task: $Task`n`nBelow are per-source summaries. Synthesise ONE coherent answer to the task, weaving them together and citing sources by [ref]. Summaries:`n`n$merged"}) } | ConvertTo-Json -Depth 6
 $answer = try { (Invoke-RestMethod $base -Method Post -TimeoutSec 120 -Headers @{Authorization="Bearer $key"} -ContentType 'application/json' -Body $synthBody).choices[0].message.content } catch { "(synthesis failed: $($_.Exception.Message))" }
 
 Write-Host "`n===== SYNTHESISED ANSWER (session $SessionId, ${Concurrency}x over $($items.Count) shards) =====" -ForegroundColor Cyan
