@@ -48,7 +48,11 @@ function Show-Status {
 switch ($Mode) {
   'Install' {
     if (-not (Test-Path $litellm)) { throw "litellm not found at $litellm — install the venv first." }
-    $action  = New-ScheduledTaskAction -Execute $litellm -Argument "--config `"$config`" --host $BindHost --port $Port"
+    # Start from the config dir with PYTHONPATH set so the HR27 write-through callback
+    # (kritical_scx_logger) imports and loads. Wrapped via cmd so PYTHONPATH is set per-run.
+    $ldir = Split-Path $config
+    $cmdArgs = "/c set `"PYTHONPATH=$ldir`" && `"$litellm`" --config `"$config`" --host $BindHost --port $Port"
+    $action  = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $cmdArgs -WorkingDirectory $ldir
     $settings= New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
     # NO trigger => manual / on-demand only (safety).
     Register-ScheduledTask -TaskName $TASK -Action $action -Settings $settings -Description 'Kritical SCX LiteLLM proxy (manual start)' -Force | Out-Null

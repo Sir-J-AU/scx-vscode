@@ -1,0 +1,245 @@
+# ============================================================
+# Kritical LiteLLM proxy — multi-provider config
+# ------------------------------------------------------------
+# Presents SCX + Anthropic + OpenAI + generic OpenAI-compatible
+# providers under BOTH OpenAI-shape and Anthropic-shape endpoints
+# on localhost. Any coding agent (Codex CLI / Aider / Cline /
+# Continue / OpenCode / goose / Claude Code / etc) points at
+# LiteLLM and the operator picks which provider serves.
+#
+# Per HR29 (.5184): this proxy is ADDITIVE. Turn it off and
+# every downstream agent falls back to talking to the real
+# provider APIs directly (api.anthropic.com / api.openai.com /
+# api.scx.ai). Zero rewrite. Zero re-install. Zero surprises.
+#
+# Reads keys from HKCU environment (Kritical convention):
+#   SCX_API_KEY           (primary) + SCX_API_KEY_2..9 (rotation)
+#   ANTHROPIC_API_KEY     (optional — enables Anthropic passthrough)
+#   OPENAI_API_KEY        (optional — enables OpenAI passthrough)
+#   GENERIC_API_KEY       (optional — enables generic slot)
+#   GENERIC_API_BASE      (optional — the generic slot's base URL)
+#
+# Author: Joshua Finley — (c) 2026 Kritical Pty Ltd
+# Contact: sales@kritical.net · ph. 1300 274 655
+# ============================================================
+
+model_list:
+  # -------- Coding / agentic tier ---------------------------
+  - model_name: minimax-m2.7          # canonical Kritical alias
+    litellm_params:
+      model: openai/MiniMax-M2.7      # SCX presents OpenAI-shape at api.scx.ai/v1
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: scx-coder
+    litellm_params:
+      model: openai/coder
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Reasoning / high-throughput ---------------------
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: openai/gpt-oss-120b
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: deepseek-v3.1
+    litellm_params:
+      model: openai/DeepSeek-V3.1
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Australian-context tune (differentiator) --------
+  - model_name: magpie
+    litellm_params:
+      model: openai/MAGPiE
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Multimodal --------------------------------------
+  - model_name: llama-4-maverick
+    litellm_params:
+      model: openai/Llama-4-Maverick-17B-128E-Instruct
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Quick / cheap -----------------------------------
+  - model_name: llama-3.3-70b
+    litellm_params:
+      model: openai/Meta-Llama-3.3-70B-Instruct
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: qwen3-32b
+    litellm_params:
+      model: openai/Qwen3-32B
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: gemma-4
+    litellm_params:
+      model: openai/gemma-4-31B-it
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Embeddings --------------------------------------
+  - model_name: e5-mistral-embeddings
+    litellm_params:
+      model: openai/E5-Mistral-7B-Instruct
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Transcription (Whisper) -------------------------
+  - model_name: whisper-large-v3
+    litellm_params:
+      model: openai/Whisper-Large-v3
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Anthropic-shape aliases -------------------------
+  # These let Anthropic-shape clients (Claude Code, Codex CLI in Anthropic
+  # mode, VS Code kritical.SCXCode) use identical model names as OpenAI-shape
+  # clients — LiteLLM normalises the request/response envelope.
+  - model_name: claude-sonnet-4-6         # familiar alias → routes to MiniMax-M2.7
+    litellm_params:
+      model: openai/MiniMax-M2.7
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+      mock_response: false
+
+  # ==========================================================
+  # ANTHROPIC PASSTHROUGH — real Claude, via operator's key
+  # ==========================================================
+  # Only active when ANTHROPIC_API_KEY is set in HKCU. Absent =
+  # rows below silently unroutable (LiteLLM returns 404 for the
+  # unresolved model, downstream client can pick another).
+  #
+  # HR29: this exists so operator can use Claude Code / Codex
+  # via LiteLLM without breaking their existing direct-Anthropic
+  # calls — same key, same models, one proxy hop.
+  # ==========================================================
+  - model_name: anthropic/claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: anthropic/claude-opus-4-7
+    litellm_params:
+      model: anthropic/claude-opus-4-7
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: anthropic/claude-haiku-4-5
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ==========================================================
+  # OPENAI PASSTHROUGH — real GPT/Codex, via operator's key
+  # ==========================================================
+  # Only active when OPENAI_API_KEY is set in HKCU.
+  # ==========================================================
+  - model_name: openai/gpt-5
+    litellm_params:
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/gpt-5-codex
+    litellm_params:
+      model: openai/gpt-5-codex
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: openai/gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ==========================================================
+  # GENERIC OPENAI-COMPATIBLE SLOT
+  # ==========================================================
+  # Point at ANY OpenAI-compatible endpoint (Ollama local, LM
+  # Studio, OpenRouter, Together, Fireworks, Groq, DeepInfra,
+  # custom internal, etc.) by setting:
+  #   GENERIC_API_BASE = e.g. http://localhost:11434/v1
+  #   GENERIC_API_KEY  = e.g. dummy for Ollama, real key for others
+  # ==========================================================
+  - model_name: generic/default
+    litellm_params:
+      model: openai/${GENERIC_MODEL_NAME}
+      api_base: os.environ/GENERIC_API_BASE
+      api_key: os.environ/GENERIC_API_KEY
+
+# -----------------------------------------------------------
+# Router-level fallback chain — automatic model-swap on 429/5xx
+# -----------------------------------------------------------
+router_settings:
+  routing_strategy: simple-shuffle
+  fallbacks:
+    - minimax-m2.7:      [scx-coder, gpt-oss-120b]
+    - scx-coder:         [minimax-m2.7, gpt-oss-120b]
+    - gpt-oss-120b:      [minimax-m2.7, deepseek-v3.1]
+    - deepseek-v3.1:     [gpt-oss-120b, minimax-m2.7]
+    - magpie:            [minimax-m2.7, gpt-oss-120b]
+    - llama-4-maverick:  [minimax-m2.7]
+    - claude-sonnet-4-6: [scx-coder, gpt-oss-120b]
+
+  # SCX-published unlimited RPM/TPM on the partner tier means we
+  # don't need aggressive local rate limits. Set a floor anyway.
+  num_retries: 2
+  timeout: 120
+  retry_after: 3
+  allowed_fails: 2
+  cooldown_time: 30
+
+# -----------------------------------------------------------
+# General settings
+# -----------------------------------------------------------
+general_settings:
+  # Local-only master key for the proxy admin API (never internet-exposed).
+  # Rotate if you ever bind to 0.0.0.0 (don't).
+  master_key: sk-kritical-scx-local
+
+  # Persist logs/usage to SQL Express KriticalBrain (per §0a-1 canonical).
+  # Uncomment when Kritical.NodeJS.SCXCodeAgent wires the SQL sink.
+  # database_url: mssql+pyodbc://@./SQLEXPRESS/KriticalBrain?driver=ODBC+Driver+18+for+SQL+Server&trusted_connection=yes
+
+  # Never leak SCX keys back to the caller — LiteLLM strips these
+  # from responses by default, but be explicit.
+  drop_params: true
+
+  # No prompt caching — matches SCX's sovereign posture ("Sovereign by design").
+  disable_spend_logs: false
+  disable_error_logs: false
+
+# -----------------------------------------------------------
+# Litellm settings
+# -----------------------------------------------------------
+litellm_settings:
+  # Localhost bind — the bridge is never exposed to the internet.
+  # Kritical.NodeJS.SCXCodeAgent + VS Code extension talk to 127.0.0.1 only.
+  set_verbose: false
+  json_logs: true
+
+  # HR27 write-through to the LOCAL sovereign store KriticalSCXCodeStore (never external).
+  # Content capture ON so the callback can persist prompts+responses for mining;
+  # storage is localhost SQL Express only — SCX's zero-retention posture is about
+  # off-shore/vendor logging, not the operator's own on-box store.
+  turn_off_message_logging: false
+  callbacks: ["kritical_scx_logger.kritical_logger"]
+
+  # Fallback across models on stream errors too.
+  fallbacks: null
+  context_window_fallbacks: null
+
+# -----------------------------------------------------------
+# Bind endpoints (LiteLLM proxy CLI default is 0.0.0.0:4000 — override)
+# -----------------------------------------------------------
+# Run via:
+#   litellm --config kritical-scx.config.yaml --host 127.0.0.1 --port 4180
+# OR for the OpenAI-shape sibling:
+#   litellm --config kritical-scx.config.yaml --host 127.0.0.1 --port 4181
