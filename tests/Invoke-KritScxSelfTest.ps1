@@ -69,6 +69,20 @@ Write-Host "`n[8] Claude/OpenAI/Google left alone (HR29)" -ForegroundColor White
 T "ANTHROPIC_BASE_URL (User) is not the proxy" { $a=[Environment]::GetEnvironmentVariable('ANTHROPIC_BASE_URL','User'); -not ($a -match '4180|127\.0\.0\.1|localhost') }
 T "stock codex auth is native" { $j=Get-Content "$env:USERPROFILE\.codex\auth.json" -Raw|ConvertFrom-Json; [bool]$j.auth_mode }
 
+Write-Host "`n[9] Storage + Lens (own DB)" -ForegroundColor White
+$srv='.\SQLEXPRESS'; $sdb='KriticalSCXCodeStore'
+T "store DB '$sdb' reachable" { $r = sqlcmd -S $srv -d $sdb -E -h -1 -W -Q "SELECT DB_ID('$sdb');" 2>&1; [bool]($r -match '\d') }
+T "core tables present (decision_log, context_shard, blob_store, sessions)" {
+  $r = sqlcmd -S $srv -d $sdb -E -h -1 -W -Q "SELECT COUNT(*) FROM sys.tables WHERE name IN ('decision_log','context_shard','blob_store','sessions');" 2>&1; [bool]($r -match '4') }
+T "SHA-dedup + DECOMPRESS view work (roundtrip)" {
+  $q = "SET NOCOUNT ON; DECLARE @c NVARCHAR(100)=N'selftest-roundtrip'; DECLARE @h CHAR(64)=CONVERT(CHAR(64),HASHBYTES('SHA2_256',@c),2);
+        IF NOT EXISTS(SELECT 1 FROM dbo.decision_log WHERE content_sha256=@h) INSERT dbo.decision_log(side,category,content_sha256,content_len,content_gz,source) VALUES('ai','test',@h,LEN(@c),COMPRESS(@c),'selftest');
+        DECLARE @out NVARCHAR(100)=(SELECT TOP 1 content FROM dbo.v_decision_log WHERE content_sha256=@h);
+        DELETE FROM dbo.decision_log WHERE source='selftest';
+        SELECT CASE WHEN @out=@c THEN 'OK' ELSE 'BAD' END;"
+  $r = sqlcmd -S $srv -d $sdb -E -h -1 -W -Q $q 2>&1; [bool]($r -match 'OK') }
+T "Lens catalog ingested (>=1 row)" { $r = sqlcmd -S $srv -d $sdb -E -h -1 -W -Q "IF OBJECT_ID('dbo.LensSqlCatalog') IS NULL SELECT 0 ELSE SELECT COUNT(*) FROM dbo.LensSqlCatalog;" 2>&1; [bool]($r -match '[1-9]') }
+
 Write-Host "`n===== $pass passed, $fail failed =====" -ForegroundColor $(if($fail){'Red'}else{'Green'})
 if($fail){ Write-Host "FAILURES: $($fails -join '; ')" -ForegroundColor Red }
 exit $fail
