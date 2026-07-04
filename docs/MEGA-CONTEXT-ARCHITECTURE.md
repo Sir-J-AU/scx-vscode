@@ -2,16 +2,16 @@
 _How SCX Code becomes storage-backed, muxed, and able to synthesise arbitrarily large context — and exactly when you can see each piece working._
 
 ## The idea in one paragraph
-A single model call is bounded by its context window. But **work can be split**. Kritical SCX shards a large task across **N concurrent SCX model calls**, each holding a slice of the context, then a **synthesiser call** stitches the slices together — "quietly under the hood" via templated prompts. Backing storage (KriticalBrain) holds the full corpus + every prior turn (HR27), so any shard can pull exactly the context it needs. The **effective** context = `(per-call window) × (concurrent calls) − overlap`, bounded only by `$budget`, storage, and how parallelisable the work is.
+A single model call is bounded by its context window. But **work can be split**. Kritical SCX shards a large task across **N concurrent SCX model calls**, each holding a slice of the context, then a **synthesiser call** stitches the slices together — "quietly under the hood" via templated prompts. Backing storage (KriticalSCXCodeStore (own DB — NOT the shared KriticalBrain)) holds the full corpus + every prior turn (HR27), so any shard can pull exactly the context it needs. The **effective** context = `(per-call window) × (concurrent calls) − overlap`, bounded only by `$budget`, storage, and how parallelisable the work is.
 
 ```
                        ┌─────────────── Kritical SCX Control Plane ───────────────┐
   VS Code ext ─┐       │  Planner: split task -> shards (by file/section/entity)   │
   kcodex CLI  ─┼─▶ :4180│  Mux: fan out N concurrent SCX calls (LiteLLM router)     │─▶ SCX (api.scx.ai)
   MCP clients ─┘  LiteLLM│  Synthesiser: reduce shard outputs -> one answer         │   15+ models
-                       │  Memory: read/write KriticalBrain (full corpus + turns)    │
+                       │  Memory: read/write KriticalSCXCodeStore (own DB — NOT the shared KriticalBrain) (full corpus + turns)    │
                        └──────────────────────────────────────────────────────────┘
-                                 │  SQL Express KriticalBrain  +  Langfuse (trace/debug)
+                                 │  SQL Express KriticalSCXCodeStore (own DB — NOT the shared KriticalBrain)  +  Langfuse (trace/debug)
 ```
 
 ## Layers (each independently on/off — HR29)
@@ -19,7 +19,7 @@ A single model call is bounded by its context window. But **work can be split**.
 |---|---|---|---|
 | **Router/proxy** | OpenAI-shape → SCX, fallbacks, retries | ✅ LIVE | `Test-KritScxRouting.ps1` (6/6, 477ms) |
 | **Model catalogue** | live-query → cache → fallback | ✅ LIVE | `Get-KritScxModels.ps1` |
-| **Backing storage** | KriticalBrain: corpus + every prompt/response (HR27) | ⏳ next | SQL row count after a session |
+| **Backing storage** | KriticalSCXCodeStore (own DB — NOT the shared KriticalBrain): corpus + every prompt/response (HR27) | ⏳ next | SQL row count after a session |
 | **Memory retrieval** | dedup (SHA+simhash), fetch relevant slices | ⏳ next | "context reconstructed from N rows" log |
 | **Mux/planner** | split work → N concurrent calls | 🔜 | trace: N parallel spans in Langfuse |
 | **Synthesiser** | reduce shard outputs → one answer | 🔜 | one answer citing M shards |
@@ -29,7 +29,7 @@ A single model call is bounded by its context window. But **work can be split**.
 ## How the "magic" works (concretely, no hand-waving)
 1. **Plan** — Planner asks a cheap SCX model to split the task into K shards (by file, section, or entity) + a merge spec.
 2. **Mux** — LiteLLM router fans out K `chat/completions` concurrently (it already load-balances + retries; we cap K by `$budget` and `MaxConcurrency`).
-3. **Store** — every prompt+response is appended to KriticalBrain (HR27), SHA/simhash-deduped, so nothing is re-sent and history is queryable.
+3. **Store** — every prompt+response is appended to KriticalSCXCodeStore (own DB — NOT the shared KriticalBrain) (HR27), SHA/simhash-deduped, so nothing is re-sent and history is queryable.
 4. **Synthesise** — a final call receives the K shard summaries (not the raw context — that's the compression) + the merge spec → single coherent answer.
 5. **Scale** — a **VS Code setting + status-bar dropdown** (`kritical.scxcode.contextScale`: `off | 2x | 4x | 8x | max`) sets `MaxConcurrency`; higher = larger synthetic context, more $/latency. Bounded automatically by `$budget` and how splittable the task is.
 
@@ -48,7 +48,18 @@ It sets up venv+LiteLLM, applies the Codex pack, installs the VS Code extension,
 
 ## When you'll see each milestone
 - **M0 (now):** routing + messaging + model catalogue — run `Test-KritScxRouting.ps1`.
-- **M1 (storage):** enable KriticalBrain sink → after one session, `SELECT COUNT(*) FROM decision_log` grows; context survives restarts.
+- **M1 (storage):** enable KriticalSCXCodeStore (own DB — NOT the shared KriticalBrain) sink → after one session, `SELECT COUNT(*) FROM decision_log` grows; context survives restarts.
 - **M2 (observability):** Langfuse in Docker → every call/shard visible in a web UI.
 - **M3 (mux):** first 4x synthetic-context answer, traced as 4 parallel spans.
 - **M4 (dropdown):** flip `contextScale` in VS Code and watch concurrency scale.
+
+## Own dedicated database (self-contained — NOT KriticalBrain)
+SCX Code is its **own project** with its **own store**: DB **`KriticalSCXCodeStore`** on its **own local SQL Express instance** (`.\SCXCODE` or `.\SQLEXPRESS`). It never writes to another project's KriticalBrain.
+
+**Self-contained installer** (`install/Install-KriticalSCXStore.ps1`, HR16 Install/Status/Repair/Uninstall) provisions everything from scratch on any Windows box:
+1. **VC++ redistributable** (SQL Server prereq) — via a known-good PowerShell installer (winget `Microsoft.VCRedist.2015+.x64`/arm64, or the community VCRedist PS module).
+2. **SQL Express** — silent install (winget `Microsoft.SQLServerExpress` or the official `/QS /ACTION=Install` bootstrapper) → dedicated instance.
+3. **Schema** — create `KriticalSCXCodeStore` + `decision_log` / `context_shard` / `session` tables (SHA+simhash columns per HR27).
+4. **Connection** — LiteLLM `database_url = mssql+pyodbc://@.\SCXCODE/KriticalSCXCodeStore?...trusted_connection=yes` (the proxy's own sink).
+
+**Remote-deploy tested** (idempotent, over **WinRM**) against `golem` and other domain machines: `Invoke-Command -ComputerName golem -FilePath Install-KriticalSCXStore.ps1`. Every run is Install→Status-verified; `Test-KritScxStore.ps1` proves the DB answers before the sink is enabled (HR17). Full backout via `-Mode Uninstall` (drops DB + optionally the instance).
