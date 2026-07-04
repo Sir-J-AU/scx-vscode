@@ -18,20 +18,18 @@ command = "C:\\Users\\joshl\\.vscode-insiders\\extensions\\ms-dynamics-smb.al-18
 args = ["launchmcpserver --transport stdio"]
 ```
 
-## High-value ADDITIONS for your stack (all MIT/official, OpenAI-shape MCP)
-| MCP | Install | Why for Kritical |
+## ALREADY CONNECTED — claude.ai connectors (server-side, NOT local config)
+These are wired into Claude Code via your claude.ai connectors — you already have them; **do not "add" them locally.** Managed in claude.ai → Connectors. Includes (non-exhaustive, from this session's connected set):
+**Playwright · Playroom · claude-in-chrome (Chrome control) · computer-use · Claude Preview · Shopify · Microsoft 365 · Azure MCP · Microsoft Learn/Docs · Desktop Commander · Windows-MCP · Microsoft Clarity · Pax8 · Falcon (CrowdStrike) · mcp-registry** — plus the plugin connectors (marketing/legal/finance/sales/etc.).
+
+**Browser/automation/PDF you ALREADY own** (so no external Playwright "addition" needed): Playwright + Playroom MCP (connected), Chrome + Edge devtools extensions, claude-in-chrome, computer-use, and your own Node.js render/PDF tooling in the connector repo (a11y-per-page, bundle-render-integrity, PDF print-to-image / print-to-print audits).
+
+## Genuinely-NOT-yet-present local additions (only if you want them AS LOCAL Codex MCP)
+| MCP | Install | Why |
 |---|---|---|
-| **filesystem** | `npx @modelcontextprotocol/server-filesystem` | scoped file access for agents |
-| **git** | `uvx mcp-server-git` | repo history/blame/diff as tools |
-| **github** | `npx @modelcontextprotocol/server-github` | issues/PRs/releases (pairs with Kritical.PS.GitHub) |
-| **sqlite / mssql** | `uvx mcp-server-sqlite` / community mssql MCP | **query `KriticalSCXCodeStore` directly** — the mined store as a tool |
-| **memory** | `npx @modelcontextprotocol/server-memory` | persistent knowledge graph (complements HR27 store) |
-| **sequential-thinking** | `npx @modelcontextprotocol/server-sequential-thinking` | structured reasoning for the muxing engine |
-| **fetch** | `uvx mcp-server-fetch` | clean URL→markdown for research |
-| **playwright** | `npx @playwright/mcp` | browser automation / theme QA (you already have Puppeteer via Codex) |
-| **azure-mcp** | `npx @azure/mcp` | you have the VS Code Azure MCP ext; CLI MCP for agents |
-| **microsoft-docs** | (hosted) | you already use Microsoft Learn MCP |
-| **time** | `uvx mcp-server-time` | tz-aware timestamps (HR27 logging) |
+| **sqlite / mssql** | community mssql MCP | let agents query `KriticalSCXCodeStore` (the mined store) directly as a tool |
+| **memory** | `npx @modelcontextprotocol/server-memory` | persistent knowledge graph on top of the HR27 store |
+| **sequential-thinking** | `npx @modelcontextprotocol/server-sequential-thinking` | structured planner for the muxing engine |
 
 ## Selector integration (planned)
 `ext-manifest.json` gains an `"mcp"` block (server → command/args/scope), and the tick-box webview lists MCP servers alongside extension stacks. Enabling an MCP loadout writes/uncomments the matching `[mcp_servers.*]` entries in `config.toml` (additive, reversible) — same pattern as extension `--disable-extension`. Claude/Codex native MCP untouched unless you tick it.
