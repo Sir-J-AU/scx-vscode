@@ -62,4 +62,6 @@ SCX Code is its **own project** with its **own store**: DB **`KriticalSCXCodeSto
 3. **Schema** — create `KriticalSCXCodeStore` + `decision_log` / `context_shard` / `session` tables (SHA+simhash columns per HR27).
 4. **Connection** — LiteLLM `database_url = mssql+pyodbc://@.\SCXCODE/KriticalSCXCodeStore?...trusted_connection=yes` (the proxy's own sink).
 
+**Optional KriticalBrain connector (dev telemetry — additive, opt-in, off by default).** The primary store is always `KriticalSCXCodeStore`. When `$env:KRIT_SCXCODE_BRAIN_TELEMETRY = 'on'`, a **secondary** sink mirrors deduped decision-log rows to KriticalBrain for cross-project analytics — never a dependency, never mixing the two DBs, and private to the operator's dev telemetry unless explicitly published. Off → SCX Code runs fully standalone (HR29).
+
 **Remote-deploy tested** (idempotent, over **WinRM**) against `golem` and other domain machines: `Invoke-Command -ComputerName golem -FilePath Install-KriticalSCXStore.ps1`. Every run is Install→Status-verified; `Test-KritScxStore.ps1` proves the DB answers before the sink is enabled (HR17). Full backout via `-Mode Uninstall` (drops DB + optionally the instance).
