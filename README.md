@@ -2,7 +2,7 @@
 
 > Node.js bridge daemon — multi-provider (SCX + Anthropic + OpenAI + generic) with auto-continuation, web tools, and HR27 write-through. **Additive layer** — turn it off and every downstream agent (Claude Code / Codex / SCX PS module) reverts to talking to real provider APIs directly.
 >
-> Status: **scaffold** (`.5184`). Fresh session builds against [../reference/CLAUDE-COWORK-KRITICAL-NODEJS-SCXCODEAGENT.md](../reference/CLAUDE-COWORK-KRITICAL-NODEJS-SCXCODEAGENT.md).
+> Status: **MVP complete** (`.5184`). Built against [../reference/CLAUDE-COWORK-KRITICAL-NODEJS-SCXCODEAGENT.md](../reference/CLAUDE-COWORK-KRITICAL-NODEJS-SCXCODEAGENT.md) — 21/21 unit tests green + verified live end-to-end against SCX (`/v1/auto-continue` round-trip through the LiteLLM proxy).
 >
 > Author: **Joshua Finley** — Kritical Pty Ltd — [sales@kritical.net](mailto:sales@kritical.net) — ph. **1300 274 655**
 
@@ -17,30 +17,33 @@ A localhost daemon at `127.0.0.1:4180` that:
 5. Writes-through every prompt + response to HR27 store.
 6. HR29 kill switch — stopping the daemon returns every downstream agent to direct-API mode.
 
-## Current scaffold status
+## Component status
 
-- ✅ `package.json` — Fastify + Undici deps declared
-- ✅ `src/server.mjs` — health endpoints functional, all business endpoints return 501 with pointer to the cowork brief
+- ✅ `package.json` — Fastify runtime dep (core logic is dependency-free; Node ≥ 20 global `fetch`)
+- ✅ `src/server.mjs` — Fastify daemon: passthrough `/v1/messages`, `/v1/chat/completions`, `/v1/models`; `/v1/auto-continue`; `/v1/tools/{web_search,web_fetch,deep_research}`; `/v1/ingest/code` hook; `/admin/kill`; HR27 write-through + `tool-calls.jsonl` ingest events
 - ✅ `src/cli.mjs` — install/remove/heal/status delegated to PS installer, start/stop functional
-- ⏳ `install/Install-KritScxCodeAgent.ps1` — TODO (fresh session; model on [../litellm/Install-KritScxLiteLLM.ps1](../litellm/Install-KritScxLiteLLM.ps1))
-- ⏳ `src/auto-continue.mjs` — TODO (port from [../ps-module/Kritical.PS.SCXCode.AutoContinue.psm1](../ps-module/Kritical.PS.SCXCode.AutoContinue.psm1))
-- ⏳ `src/hr27.mjs` — TODO (shell out to PS logger OR port SimHash)
-- ⏳ `src/tools/web-search.mjs` + `web-fetch.mjs` + `deep-research.mjs` — TODO
-- ⏳ `test/*.test.mjs` — TODO (4 test files per cowork brief)
+- ✅ `install/Install-KritScxCodeAgent.ps1` — HR16 Install/Remove/Heal/Status, HR14 runtime mirror off OneDrive, HR17 health-probe, HR26 wave receipt, HR29 kill-switch line
+- ✅ `src/auto-continue.mjs` — port of `Invoke-KritScxAutoContinue` (natural-terminator + SimHash adjacent-paragraph dedup)
+- ✅ `src/hr27.mjs` — JS port of the HR27 logger (SHA256 + 64-bit SimHash + JSONL append, exact-dupe skip, `KRITICAL_LOGGER_TARGET` honoured)
+- ✅ `src/tools/web-search.mjs` + `web-fetch.mjs` + `deep-research.mjs` — Brave/Tavily/DuckDuckGo, static fetch + optional Playwright, search→fetch→dedup→summarise
+- ✅ `test/*.test.mjs` — 4 files, **21/21 green** via `node --test` (auto-continue, hr27, health, hr29 regression lock)
 
-## Quick smoke test (scaffold-only)
+## Build + run (HR14-safe)
 
-```bash
-cd node-agent
-# HR14 — install to %TEMP% not this folder's node_modules/:
-$env:npm_config_prefix = "$env:TEMP/kritical-scxcode-agent"
-npm install fastify undici
-node src/server.mjs
-# in another terminal:
+```powershell
+# The daemon's node_modules must NOT live in this OneDrive repo (HR14).
+# The installer builds a runtime mirror under %LOCALAPPDATA% and installs there:
+pwsh ./install/Install-KritScxCodeAgent.ps1 -Mode Install -Apply
+pwsh ./install/Install-KritScxCodeAgent.ps1 -Mode Status
+
 curl http://127.0.0.1:4180/health/liveliness
+curl -X POST http://127.0.0.1:4180/v1/auto-continue -H "content-type: application/json" `
+  -d '{"prompt":"hi","model":"minimax-m2.7","max_continues":2}'
 ```
 
-Expected: JSON response with the provider slot table and HR29 kill-switch block.
+To run the tests, mirror `src/` + `test/` + `package.json` to a `%TEMP%` folder, `npm install fastify` there, and `node --test` (keeps `node_modules` off OneDrive per HR14).
+
+Expected liveliness response: JSON with the provider slot table and HR29 kill-switch block.
 
 ## HR29 kill switch
 
