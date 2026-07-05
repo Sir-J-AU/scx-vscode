@@ -794,10 +794,15 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
         else { panel.webview.postMessage({ type: 'error', error: folder ? 'No readable text files in that folder.' : 'No readable text files selected.' }); }
       }
     } else if (msg.type === 'attachRepo') {
-      const found = await vscode.workspace.findFiles('**/*.{ts,js,py,ps1,psm1,al,md,json,yaml,yml}', '**/{node_modules,out,.git,.alpackages}/**', 80);
-      const rel = found.map((f) => vscode.workspace.asRelativePath(f)).sort();
-      attached += `\n\n## Workspace files (${rel.length}):\n${rel.join('\n')}\n`;
-      panel.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: attached.length });
+      // .5231 — attach the ACTUAL open workspace repo (real file contents), not just a path list.
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders || !folders.length) {
+        panel.webview.postMessage({ type: 'error', error: 'No workspace folder is open — open your repo folder in VS Code (File → Open Folder), then click Repo.' });
+      } else {
+        const { block, fileCount, chars } = await collectAttachments(folders.map((f) => f.uri));
+        if (fileCount) { attached += block; panel.webview.postMessage({ type: 'fileAttached', name: `repo · ${fileCount} file(s)`, chars, preview: block.length > 12000 ? block.slice(0, 12000) + '\n\n_… preview truncated; the full repo contents are attached to your next message._' : block }); }
+        else { panel.webview.postMessage({ type: 'error', error: 'No readable text files found in the workspace.' }); }
+      }
     } else if (msg.type === 'listMcp') {
       vscode.commands.executeCommand('kritical.scxcode.setupGui');   // .5229 — open the real MCP/Codex setup GUI
     } else if (msg.type === 'scxCodex') {
@@ -1247,10 +1252,15 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           else { view.webview.postMessage({ type: 'error', error: folder ? 'No readable text files in that folder.' : 'No readable text files selected.' }); }
         }
       } else if (msg.type === 'attachRepo') {
-        const found = await vscode.workspace.findFiles('**/*.{ts,js,py,ps1,psm1,al,md,json,yaml,yml}', '**/{node_modules,out,.git,.alpackages}/**', 80);
-        const rel = found.map((f) => vscode.workspace.asRelativePath(f)).sort();
-        this._attached += `\n\n## Workspace files (${rel.length}):\n${rel.join('\n')}\n`;
-        view.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: this._attached.length });
+        // .5231 — attach the ACTUAL open workspace repo (real file contents), not just a path list.
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || !folders.length) {
+          view.webview.postMessage({ type: 'error', error: 'No workspace folder is open — open your repo folder in VS Code (File → Open Folder), then click Repo.' });
+        } else {
+          const { block, fileCount, chars } = await collectAttachments(folders.map((f) => f.uri));
+          if (fileCount) { this._attached += block; view.webview.postMessage({ type: 'fileAttached', name: `repo · ${fileCount} file(s)`, chars, preview: block.length > 12000 ? block.slice(0, 12000) + '\n\n_… preview truncated; the full repo contents are attached to your next message._' : block }); }
+          else { view.webview.postMessage({ type: 'error', error: 'No readable text files found in the workspace.' }); }
+        }
       } else if (msg.type === 'listMcp') {
         vscode.commands.executeCommand('kritical.scxcode.setupGui');   // .5229 — open the real MCP/Codex setup GUI
       } else if (msg.type === 'scxCodex') {
