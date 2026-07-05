@@ -804,8 +804,10 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       vscode.commands.executeCommand('kritical.scxcode.scxCodex');
     } else if (msg.type === 'config') {
       const cfg = getConfig();
+      let mcpCount = 0; try { mcpCount = Object.keys(readCodexConfig().mcp_servers || {}).length; } catch { /* none */ }
       panel.webview.postMessage({ type: 'config', model: cfg.defaultModel, models: getModelCatalog(), keyCount: cfg.apiKeys.length,
-        autoContext: cfg.autoContext, maxTokens: cfg.maxTokens, concurrency: cfg.concurrency, temperature: cfg.temperature, provider: cfg.provider });
+        autoContext: cfg.autoContext, maxTokens: cfg.maxTokens, concurrency: cfg.concurrency, temperature: cfg.temperature, provider: cfg.provider,
+        baseUrl: cfg.baseUrl, apiKeySet: !!cfg.apiKey, mcpCount });
     }
   });
   panel.webview.postMessage({ type: 'ready' });
@@ -866,6 +868,11 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
 .msg.assistant pre { background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0; font-family: var(--kr-mono); font-size: 12px; position: relative; }
 .msg.assistant code { font-family: var(--kr-mono); background: rgba(255,255,255,0.05); padding: 0 3px; border-radius: 2px; }
 .msg.assistant pre code { background: transparent; padding: 0; }
+.scx-status { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px 10px; opacity: 0.85; border-bottom: 1px solid var(--kr-border); background: rgba(21,175,209,0.04); }
+.scx-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #888; flex: none; }
+.scx-status .dot.on { background: #42c26b; box-shadow: 0 0 6px #42c26b88; }
+.scx-status .dot.off { background: #e3b341; }
+.scx-status .cap { color: var(--kr-accent); }
 .msg.attach { background: transparent; border: 1px solid var(--kr-border); border-left: 3px solid var(--kr-accent); padding: 0; max-width: 100%; overflow: hidden; }
 .attach-head { padding: 7px 10px; cursor: pointer; font-size: 12px; user-select: none; display: flex; align-items: center; gap: 5px; }
 .attach-head:hover { background: rgba(255,255,255,0.03); }
@@ -907,6 +914,9 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
 <div class="adv" id="adv">
   <label title="Sampling temperature (SCX accepts 0–2). The source marker shows whether this is the model's published recommendation (rec), a neutral default when none is published (def), the live API value (api), or your manual override (you).">Temp <input type="range" id="temp" min="0" max="2" step="0.05" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
   <label>Provider <select id="provider"><option value="auto">Auto (SCX→Claude CLI)</option><option value="scx-native">SCX only</option><option value="claude-code-cli">Claude CLI only</option></select></label>
+</div>
+<div class="scx-status" id="scxStatus" title="Live SCX connection status">
+  <span class="dot" id="scxDot"></span><span id="scxStatusText">connecting…</span>
 </div>
 <div id="chat"></div>
 <div class="input">
@@ -1088,7 +1098,7 @@ window.addEventListener('message', (e) => {
     sessionOutTokens += (m.tokensOut || 0);
     const keyLabel = m.keyIndex > 1 ? ' · key' + m.keyIndex : '';
     const ctxLabel = m.autoContextChars > 0 ? ' · ctx ' + m.autoContextChars + 'c' : '';
-    const muxLabel = m.shards > 1 ? ' · muxed ×' + m.shards : '';
+    const muxLabel = m.shards > 1 ? ' · 🔀 ' + m.shards + '-stream synthesis' : '';
     add('assistant', m.text, m.model + keyLabel + muxLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
     if (m.model) modelEl.value = m.model;
     send.disabled = false;
@@ -1113,6 +1123,19 @@ window.addEventListener('message', (e) => {
     // .5227 — load respects the persisted temperature; per-model snapping happens on interactive model change.
     if (typeof m.temperature === 'number') { tempEl.value = String(m.temperature); tempVal.textContent = String(m.temperature); }
     if (m.keyCount > 1) modelEl.title = 'SCX model · ' + m.keyCount + ' keys available';
+    // .5231 — connection / capability status strip
+    var _dot = document.getElementById('scxDot'), _st = document.getElementById('scxStatusText');
+    if (_st) {
+      var host = (m.baseUrl || '').replace(/^https?:\\/\\//, '') || 'SCX';
+      var connected = !!m.apiKeySet;
+      _dot.className = 'dot ' + (connected ? 'on' : 'off');
+      var keyN = m.keyCount || 1;
+      _st.innerHTML = (connected ? '● SCX connected' : '○ SCX key not set') + ' · ' + host + ' · ' + esc(m.model || '') +
+        ' · ' + keyN + ' key' + (keyN > 1 ? 's' : '') +
+        ' · <span class="cap">' + (m.mcpCount || 0) + ' MCP</span>' +
+        ' · <span class="cap">edits files ✓</span>' +
+        ' · <span class="cap">agentic via SCX Codex ✓</span>';
+    }
   } else if (m.type === 'fileAttached') {
     ctxChip.textContent = '📎 ' + m.name + ' (' + m.chars + 'c)';
     if (m.preview) { addAttachPreview(m.name, m.chars, m.preview); }
@@ -1130,7 +1153,7 @@ window.addEventListener('message', (e) => {
 // the real defaultModel (and the '…' placeholder resolves).
 vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.17</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode</div>
 </body></html>`;
 }
 
@@ -1234,6 +1257,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
         vscode.commands.executeCommand('kritical.scxcode.scxCodex');
       } else if (msg.type === 'config') {
         const cfg = getConfig();
+        let mcpCount = 0; try { mcpCount = Object.keys(readCodexConfig().mcp_servers || {}).length; } catch { /* none */ }
         view.webview.postMessage({
           type: 'config',
           model: cfg.defaultModel,
@@ -1244,6 +1268,9 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           concurrency: cfg.concurrency,
           temperature: cfg.temperature,
           provider: cfg.provider,
+          baseUrl: cfg.baseUrl,
+          apiKeySet: !!cfg.apiKey,
+          mcpCount,
         });
       }
     });
