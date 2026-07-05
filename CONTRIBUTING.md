@@ -1,115 +1,87 @@
 # Contributing to Kritical.SCXCode
 
-Thanks for looking. This repo powers the Kritical SCX ecosystem across
-five deployment surfaces — the VS Code extension, a Continue.dev config
-template, Cline / Roo docs, a PowerShell 7 module, and an MCP server.
-The guidance below keeps the contribution surface tidy.
+## Repo Layout (Surfaces)
 
-## Ground rules
-
-1. **Never commit API keys, tokens, or `.env` files.** Secrets live in
-   `HKCU` by convention. If you find a real secret in a diff, stop and
-   rotate.
-2. **Never bulk-restore whole files from git**
-   (`git checkout <sha> -- <path>`). Semantic diff peak-vs-HEAD;
-   cherry-pick only the piece belonging in the target file.
-3. **Idempotent installer contract.** Any script that mutates external
-   state (extension install, `HKCU` env, config drop) exposes
-   `-Mode Install | Remove | Heal | Status`. Reference:
-   `install/Install-KritScxVsCode.ps1`.
-4. **Live-verify before shipping.** If you claim it works, include the
-   receipt (`receipts/*.json`) or a captured log line as evidence in the
-   PR body.
-
-## Local dev
-
-### Path A (Continue config)
-
-```powershell
-pwsh install/Install-KritScxVsCode.ps1 -Mode Install
+```
+Kritical.SCXCode/
+├── src/                          # VS Code extension (TypeScript, VSIX 0.1.27)
+├── ps-module/                    # PowerShell module (11 functions + 4 aliases)
+├── mcp-server/                   # stdio JSON-RPC 2.0 MCP server
+├── codex-wrapper/                # Agentic Codex shim + PowerShell wrapper
+├── store-mcp/                    # Node SQLite corpus store + miner
+├── mux/                          # Multi-model parallel mux + synthesis
+├── lens/                         # Lens Looking Glass (SQL Server ingest + corpus mining)
+├── docs/                         # Architecture, specs, bugfix waves
+├── install/                      # Idempotent install/heal/status scripts
+├── safety/                       # Recovery scripts
+└── tests/                        # Test suites
 ```
 
-### Path C (VS Code extension)
+## Building
 
+### VS Code Extension
 ```bash
 cd src
-npm install
-npm run build           # esbuild bundles to out/extension.js
+npm run build  # esbuild bundle to out/extension.js
 ```
-
-Open the folder in VS Code. Press `F5` for the extension host. Command palette
-→ "Kritical: Test SCX Connection" to verify auth.
-
-### Path D (PS module)
-
-```powershell
-Import-Module ./ps-module/Kritical.PS.SCXCode.psd1 -Force
-Test-KritScxConnection
-scx 'what is 47*3?'
-```
-
-### Path E (MCP server)
-
-```bash
-node mcp-server/server.mjs
-# stdio JSON-RPC 2.0. Send initialize + tools/list to test.
-```
-
-## Adding a new SCX model
-
-1. Verify with `curl -sf https://api.scx.ai/v1/models` that the model is real.
-2. Update **`config-templates/continue-config.json`** — new `models[]` entry.
-3. Update **`src/package.json`** — `kritical.scxcode.defaultModel.enum` and
-   `enumDescriptions` arrays.
-4. Update **`src/extension.ts`** — `cmdPickModel` catalog array.
-5. Update **`docs/PROVIDERS.md`** — add a row with AUD pricing + context length.
-6. Update **`ps-module/Kritical.PS.SCXCode.psm1`** — no code change needed
-   (dynamic model list via `Get-KritScxModels`), but consider adding a helper
-   alias if the model becomes a preferred default.
-
-## Adding a new CLI to the installer
-
-Drop a row into `$CLI_MAP` inside `install/Install-KritAiCLIs.ps1`. Each row:
-
-```powershell
-'my-cli' = @{
-    DisplayName = 'Human readable name'
-    NpmPackage  = '@vendor/cli-package'      # OR PipPackage 'x' OR WingetId 'Vendor.Product'
-    BinName     = 'my-cli.cmd'
-    InstallCmd  = { npm install -g @vendor/cli-package --silent 2>&1 | Out-String }
-    RemoveCmd   = { npm uninstall -g @vendor/cli-package 2>&1 | Out-String }
-    TestCmd     = { param($bin) & $bin --version 2>&1 | Out-String }
-    Homepage    = 'https://vendor.com/cli'
-}
-```
-
-Then update the `Only` `ValidateSet` list in the `param()` block.
 
 ## Testing
 
-Not yet wired. Roadmap:
+### Node Tests (.mjs)
+```bash
+node --test tests/*.mjs
+```
 
-- **`src/`** — Vitest for unit tests of `scxPost` + `chatWithFailover`;
-  `@vscode/test-electron` for extension host integration
-- **`ps-module/`** — Pester 5.x tests for each exported function
-- **`mcp-server/`** — Vitest for handleTool dispatch
+### Python Tests (.py)
+```bash
+python -m pytest tests/*.py
+```
 
-Contributions welcome to seed each of these.
+### Shim Tests
+```bash
+cd codex-wrapper
+node --test scx-agentic-shim.test.mjs
+```
 
-## Commit style
+## HARD RULES
 
-Conventional commits: `<type>: <imperative summary>` where type is one
-of `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, or `perf`.
+**HR1**: SCX_API_KEY only for AI inference — never OPENAI_/ANTHROPIC_ keys. All surfaces must use SCX-native credentials only.
 
-Examples:
+**HR29**: Additive layers only — never disruptive. Removing any Kritical component must return the operator to a working baseline.
 
-- `feat: add Kritical.SCXCode marketplace listing`
-- `fix: load-balance skips penalty-boxed provider on next attempt`
-- `docs: correct SCX MiniMax-M2.7 context length in docs/PROVIDERS.md`
+**Network Security**: Never bind 0.0.0.0. Localhost (127.0.0.1) only.
 
-Keep commit subjects professional — no profanity, no personal quotes.
+**Operator Environment**: Keep vanilla ~/.codex pristine. Never modify the operator's real Codex CLI installation or configuration.
 
-## Sign-off
+## Commit Style
 
-By contributing you agree that your contribution is licensed under Apache 2.0
-matching the rest of the repo.
+Use conventional commits with .5231-style wave tags:
+
+```
+feat(shim): add plan-gate retry telemetry [.5231]
+
+Fixes scx-deep-bughunt finding #5: clean error return on retry failure.
+
+Co-Authored-By: Joshua Finley <joshua.finley@kritical.net>
+```
+
+Include `Co-Authored-By` trailers for all contributing engineers.
+
+## Sovereign-SCX Bulk-Write Loop
+
+1. **SCX drafts**: Use SCX models for initial implementation
+2. **Operator lenses**: Human review with Lens Looking Glass introspection
+3. **Verification**: Run full test suite + adversarial verification
+4. **Landing**: Commit only after all checks pass
+
+All contributions must pass the full test suite and adhere to the architectural patterns documented in `docs/ARCHITECTURE.md`.
+
+## Getting Started
+
+1. Fork the repository
+2. Create a feature branch from `main`
+3. Make additive changes only (HR29)
+4. Test thoroughly across all affected surfaces
+5. Submit a PR with conventional commit messages and Co-Authored-By tags
+
+All contributions are licensed under Apache-2.0. By contributing, you agree to license your work under the same terms.
