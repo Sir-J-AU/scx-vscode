@@ -2,7 +2,7 @@
   "name": "SCXCode",
   "displayName": "Kritical SCXCode",
   "description": "SCX in VS Code the Kritical way — chat + inline complete + model picker + auto-failover for MiniMax-M2.7 / MAGPiE / gpt-oss-120b / DeepSeek-V3.1 / coder / gemma-4 / Qwen3 / Llama-4-Maverick.",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "publisher": "kritical",
   "author": {
     "name": "Joshua Finley",
@@ -109,6 +109,16 @@
         "command": "kritical.scxcode.muxQuery",
         "title": "Kritical: Synthetic-Context Query (mux N streams)",
         "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.openCodex",
+        "title": "Kritical: Open SCX Codex (terminal — SCX-branded, never touches real codex)",
+        "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.checkUpdate",
+        "title": "Kritical: Check for SCXCode Update (sideloaded VSIX)",
+        "category": "Kritical SCXCode"
       }
     ],
     "menus": {
@@ -127,6 +137,11 @@
           "command": "kritical.scxcode.openSettings",
           "when": "view == kritical.scxcode.chat",
           "group": "navigation@3"
+        },
+        {
+          "command": "kritical.scxcode.openCodex",
+          "when": "view == kritical.scxcode.chat",
+          "group": "navigation@4"
         }
       ],
       "editor/title": [
@@ -164,6 +179,14 @@
         {
           "command": "kritical.scxcode.showStatus",
           "when": "true"
+        },
+        {
+          "command": "kritical.scxcode.openCodex",
+          "when": "true"
+        },
+        {
+          "command": "kritical.scxcode.checkUpdate",
+          "when": "true"
         }
       ]
     },
@@ -200,6 +223,12 @@
           "type": "string",
           "default": "https://api.scx.ai",
           "description": "SCX API base URL. Change only if you point at a self-hosted SCX mirror.",
+          "scope": "application"
+        },
+        "kritical.scxcode.codexWrapperPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the SCX Codex wrapper (kritical-codex.ps1). Leave blank to auto-discover in the workspace / extension. Used by the '✦ SCX Codex' button and the Open SCX Codex command.",
           "scope": "application"
         },
         "kritical.scxcode.defaultModel": {

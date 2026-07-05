@@ -33,11 +33,11 @@ L.message[0]({ data:{ type:'config', model:'MiniMax-M2.7', models, temperature:0
 ok('load reflects MiniMax default temp 0.3', els.temp.value === '0.3');
 
 function changeModel(id){ posted.length = 0; els.model.value = id; els.model.onchange_(); }
-changeModel('coder');           ok('coder snaps temp to 0.1', els.temp.value === '0.1');
-ok('coder change posts temperature 0.1', posted.some(p => p.type==='setConfig' && p.key==='temperature' && p.value===0.1));
+changeModel('coder');           ok('coder snaps temp to 0.2', els.temp.value === '0.2');
+ok('coder change posts temperature 0.2', posted.some(p => p.type==='setConfig' && p.key==='temperature' && p.value===0.2));
 ok('coder change posts defaultModel', posted.some(p => p.type==='setConfig' && p.key==='defaultModel' && p.value==='coder'));
-changeModel('gemma-4-31B-it');  ok('gemma snaps temp to 0.6', els.temp.value === '0.6');
-changeModel('DeepSeek-V3.1');   ok('deepseek snaps temp to 0.2', els.temp.value === '0.2');
+changeModel('gemma-4-31B-it');  ok('gemma snaps temp to 1', els.temp.value === '1');
+changeModel('DeepSeek-V3.1');   ok('deepseek snaps temp to 0.6', els.temp.value === '0.6');
 
 // operator override -> subsequent model changes must NOT snap
 els.temp.value = '0.9'; els.temp.onchange_();

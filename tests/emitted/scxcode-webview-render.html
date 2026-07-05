@@ -1,6 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8" />
 <title>Kritical SCXCode</title>
-<style nonce="7x2qqr3q">
+<style nonce="7odujosr">
 :root {
   /* Canonical Kritical brand palette per Kritical-Branding/public/brand-spec.json (2026-06-25).
      Supersedes earlier #F2B500 gold — brand-spec confirmed secondary = #15AFD1 cyan. */
@@ -26,6 +26,14 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
 .controls { display: flex; gap: 12px; align-items: center; padding: 5px 12px; background: var(--kr-panel); border-bottom: 1px solid var(--kr-border); flex-wrap: wrap; flex-shrink: 0; }
 .controls label { font-size: 11px; opacity: 0.85; display: flex; gap: 4px; align-items: center; }
 .controls select, .adv select, .adv input { background: var(--kr-bg); color: var(--kr-fg); border: 1px solid var(--kr-border); border-radius: 3px; font-size: 11px; padding: 1px 3px; }
+/* .5228 — Windows/Chromium renders native <option> popups with OS list colors (white bg), which produced
+   white-on-white unreadable text that only appeared on hover. Force VS Code dropdown/list theme colors so
+   every option is readable in the closed control AND the open popup, in any theme. */
+select option, .model-select option { background: var(--vscode-dropdown-listBackground, var(--vscode-editorWidget-background, #252526)); color: var(--vscode-dropdown-foreground, var(--vscode-editor-foreground, #e5e5e5)); }
+select option:checked { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #ffffff); }
+/* the closed model-select sits on the navy header; give it explicit dark-on-light so its own text never
+   collapses into the header when a light theme flips --vscode vars. */
+.model-select:focus { outline: 1px solid var(--kr-accent); }
 .adv-btn { margin-left: auto; background: transparent; border: 1px solid var(--kr-border); color: var(--kr-fg); border-radius: 3px; cursor: pointer; padding: 1px 7px; font-size: 12px; }
 .adv-btn:hover, .adv-btn.on { border-color: var(--kr-accent); color: var(--kr-accent); }
 .adv { display: none; gap: 14px; align-items: center; padding: 5px 12px; background: var(--kr-panel); border-bottom: 1px solid var(--kr-border); flex-shrink: 0; }
@@ -71,7 +79,7 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
   <button class="adv-btn" id="advBtn" title="Advanced options">⚙</button>
 </div>
 <div class="adv" id="adv">
-  <label>Temp <input type="range" id="temp" min="0" max="1" step="0.1" value="0.2"><span id="tempVal">0.2</span></label>
+  <label title="Sampling temperature. The source marker shows whether this is the model's published recommendation, a neutral default (no published value), from the live API, or your manual override.">Temp <input type="range" id="temp" min="0" max="1" step="0.1" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
   <label>Provider <select id="provider"><option value="auto">Auto (SCX→Claude CLI)</option><option value="scx-native">SCX only</option><option value="claude-code-cli">Claude CLI only</option></select></label>
 </div>
 <div id="chat"></div>
@@ -80,6 +88,7 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
     <button class="tool-btn" id="tbUpload" title="Upload a file into the next message">📎 File</button>
     <button class="tool-btn" id="tbRepo" title="Attach a workspace file summary">📁 Repo</button>
     <button class="tool-btn" id="tbMcp" title="MCP servers &amp; tools">🔌 MCP</button>
+    <button class="tool-btn" id="tbCodex" title="Open SCX Codex (Kritical/SCX-branded Codex CLI) in a terminal — never touches your real codex config">✦ SCX Codex</button>
     <span class="ctx-chip" id="ctxChip"></span>
   </div>
   <div class="input-row">
@@ -87,7 +96,7 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
     <button class="send" id="send">Send</button>
   </div>
 </div>
-<script nonce="7x2qqr3q">
+<script nonce="7odujosr">
 // .5227 — tolerate running outside the VS Code host (static render / visual test harness): never hard-crash.
 const vscode = (typeof acquireVsCodeApi !== 'undefined') ? acquireVsCodeApi() : { postMessage: function () {}, getState: function () {}, setState: function () {} };
 const chat = document.getElementById('chat');
@@ -96,7 +105,7 @@ const send = document.getElementById('send');
 const modelEl = document.getElementById('model');
 // .5227 — PRESEED the model dropdown at load so it is NEVER blank, even before the host sends
 // the (possibly live) model list. The config message then replaces these with the authoritative list.
-([{"id":"MiniMax-M2.7","detail":"192K · default agentic"},{"id":"gpt-oss-120b","detail":"131K · cheapest reasoner"},{"id":"DeepSeek-V3.1","detail":"131K · hardest problems"},{"id":"Meta-Llama-3.3-70B-Instruct","detail":"131K · dense"},{"id":"gemma-4-31B-it","detail":"131K · multimodal"},{"id":"Qwen3-32B","detail":"32K · 119 languages"},{"id":"Llama-4-Maverick-17B-128E-Instruct","detail":"131K · multimodal"},{"id":"MAGPiE","detail":"131K · near o4-mini reasoning"},{"id":"coder","detail":"196K · algorithms + debugging"},{"id":"E5-Mistral-7B-Instruct","detail":"live"},{"id":"Whisper-Large-v3","detail":"live"},{"id":"opir-large","detail":"live"}]).forEach(function (mo) { var o = document.createElement('option'); o.value = mo.id; o.textContent = mo.id + (mo.detail ? ' — ' + mo.detail : ''); modelEl.appendChild(o); });
+([{"id":"MiniMax-M2.7","detail":"192K · default agentic","temp":1,"tempSrc":"rec"},{"id":"MAGPiE","detail":"131K · near o4-mini reasoning","temp":0.7,"tempSrc":"def"},{"id":"gpt-oss-120b","detail":"131K · cheapest reasoner","temp":1,"tempSrc":"rec"},{"id":"DeepSeek-V3.1","detail":"131K · hardest problems","temp":0.6,"tempSrc":"rec"},{"id":"coder","detail":"196K · algorithms + debugging","temp":0.2,"tempSrc":"rec"},{"id":"gemma-4-31B-it","detail":"131K · multimodal","temp":1,"tempSrc":"rec"},{"id":"Llama-4-Maverick-17B-128E-Instruct","detail":"131K · multimodal","temp":0.6,"tempSrc":"rec"},{"id":"Meta-Llama-3.3-70B-Instruct","detail":"131K · dense","temp":0.6,"tempSrc":"rec"},{"id":"Qwen3-32B","detail":"32K · 119 languages","temp":0.7,"tempSrc":"rec"}]).forEach(function (mo) { var o = document.createElement('option'); o.value = mo.id; o.textContent = mo.id + (mo.detail ? ' — ' + mo.detail : ''); modelEl.appendChild(o); });
 const clearBtn = document.getElementById('clear');
 let sessionInTokens = 0;
 let sessionOutTokens = 0;
@@ -175,17 +184,35 @@ const providerEl = document.getElementById('provider');
 const advBtn = document.getElementById('advBtn');
 const advPanel = document.getElementById('adv');
 const ctxChip = document.getElementById('ctxChip');
-modelEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'defaultModel', value: modelEl.value });
+// .5228 — per-model temperature defaults + SOURCE (embedded at render). Selecting a model snaps the
+// slider to its default UNLESS the operator overrode temperature this session. The source marker tells
+// the operator whether the value is a published recommendation, a neutral default, or from the live API.
+const _modelTemps = {"MiniMax-M2.7":1,"MAGPiE":0.7,"gpt-oss-120b":1,"DeepSeek-V3.1":0.6,"coder":0.2,"gemma-4-31B-it":1,"Llama-4-Maverick-17B-128E-Instruct":0.6,"Meta-Llama-3.3-70B-Instruct":0.6,"Qwen3-32B":0.7};
+const _modelTempSrcs = {"MiniMax-M2.7":"rec","MAGPiE":"def","gpt-oss-120b":"rec","DeepSeek-V3.1":"rec","coder":"rec","gemma-4-31B-it":"rec","Llama-4-Maverick-17B-128E-Instruct":"rec","Meta-Llama-3.3-70B-Instruct":"rec","Qwen3-32B":"rec"};
+const _tempFallback = 0.7;
+const _tempSrcLabel = { rec: 'recommended', def: 'neutral default', api: 'from API' };
+const tempSrcEl = document.getElementById('tempSrc');
+let _tempUserSet = false;
+function _applyModelTemp(id, post) {
+  if (_tempUserSet) { if (tempSrcEl) tempSrcEl.textContent = '(your override)'; return; }  // respect operator override
+  var t = (_modelTemps && typeof _modelTemps[id] === 'number') ? _modelTemps[id] : _tempFallback;
+  var s = (_modelTempSrcs && _modelTempSrcs[id]) ? _modelTempSrcs[id] : 'def';
+  tempEl.value = String(t); tempVal.textContent = String(t);
+  if (tempSrcEl) tempSrcEl.textContent = '(' + (_tempSrcLabel[s] || 'default') + ')';
+  if (post) vscode.postMessage({ type: 'setConfig', key: 'temperature', value: t });
+}
+modelEl.onchange = () => { vscode.postMessage({ type: 'setConfig', key: 'defaultModel', value: modelEl.value }); _applyModelTemp(modelEl.value, true); };
 lenEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'maxTokens', value: parseInt(lenEl.value, 10) });
 streamsEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'concurrency', value: parseInt(streamsEl.value, 10) });
 ctxEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'autoContext', value: ctxEl.value });
 providerEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'provider', value: providerEl.value });
 tempEl.oninput = () => { tempVal.textContent = tempEl.value; };
-tempEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'temperature', value: parseFloat(tempEl.value) });
+tempEl.onchange = () => { _tempUserSet = true; vscode.postMessage({ type: 'setConfig', key: 'temperature', value: parseFloat(tempEl.value) }); };
 advBtn.onclick = () => { advPanel.classList.toggle('open'); advBtn.classList.toggle('on'); };
 document.getElementById('tbUpload').onclick = () => vscode.postMessage({ type: 'uploadFile' });
 document.getElementById('tbRepo').onclick = () => vscode.postMessage({ type: 'attachRepo' });
 document.getElementById('tbMcp').onclick = () => vscode.postMessage({ type: 'listMcp' });
+document.getElementById('tbCodex').onclick = () => vscode.postMessage({ type: 'openCodex' });
 clearBtn.onclick = () => {
   chat.innerHTML = '';
   sessionInTokens = 0; sessionOutTokens = 0;
@@ -233,6 +260,7 @@ window.addEventListener('message', (e) => {
     if (typeof m.concurrency === 'number') streamsEl.value = String(m.concurrency);
     if (m.autoContext) ctxEl.value = m.autoContext;
     if (m.provider) providerEl.value = m.provider;
+    // .5227 — load respects the persisted temperature; per-model snapping happens on interactive model change.
     if (typeof m.temperature === 'number') { tempEl.value = String(m.temperature); tempVal.textContent = String(m.temperature); }
     if (m.keyCount > 1) modelEl.title = 'SCX model · ' + m.keyCount + ' keys available';
   } else if (m.type === 'fileAttached') {
@@ -251,5 +279,5 @@ window.addEventListener('message', (e) => {
 // the real defaultModel (and the '…' placeholder resolves).
 vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.12</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.14</div>
 </body></html>

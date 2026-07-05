@@ -78,25 +78,33 @@ function getConfig() {
 }
 
 // .5213 — the SCX model catalog surfaced in the in-panel dropdown (label + one-line detail).
-// .5227 — each model carries its RECOMMENDED default temperature (temp): reasoners + the coder run
-// cold for determinism; multimodal/creative models run warmer. Selecting a model snaps the slider
-// to this default (until the operator overrides it), so every model gets a sane temperature.
-type ScxModel = { id: string; detail: string; temp: number };
+// .5228 — each model carries a default temperature (temp) + tempSrc marking WHERE it came from so we
+// never silently pretend a guess is authoritative:
+//   'rec' = the model/provider PUBLISHES a recommended sampling temperature — we use it verbatim.
+//   'def' = no published recommendation found — we use a neutral general-purpose 0.7 (NOT cold 0.2).
+//   'api' = the live /v1/models response carried a temperature default — that wins over both.
+// The webview temp control shows the source so the operator knows a value is a recommendation vs a fallback.
+type ScxModel = { id: string; detail: string; temp: number; tempSrc?: 'rec' | 'def' | 'api' };
+const SCX_TEMP_NEUTRAL = 0.7; // general-purpose default when no published recommendation exists.
 const SCX_MODEL_CATALOG: ScxModel[] = [
-  { id: 'MiniMax-M2.7', detail: '192K · default agentic', temp: 0.3 },
-  { id: 'MAGPiE', detail: '131K · near o4-mini reasoning', temp: 0.2 },
-  { id: 'gpt-oss-120b', detail: '131K · cheapest reasoner', temp: 0.2 },
-  { id: 'DeepSeek-V3.1', detail: '131K · hardest problems', temp: 0.2 },
-  { id: 'coder', detail: '196K · algorithms + debugging', temp: 0.1 },
-  { id: 'gemma-4-31B-it', detail: '131K · multimodal', temp: 0.6 },
-  { id: 'Llama-4-Maverick-17B-128E-Instruct', detail: '131K · multimodal', temp: 0.6 },
-  { id: 'Meta-Llama-3.3-70B-Instruct', detail: '131K · dense', temp: 0.4 },
-  { id: 'Qwen3-32B', detail: '32K · 119 languages', temp: 0.3 },
+  { id: 'MiniMax-M2.7', detail: '192K · default agentic', temp: 1.0, tempSrc: 'rec' },          // MiniMax M2 docs: temperature=1.0, top_p=0.95
+  { id: 'MAGPiE', detail: '131K · near o4-mini reasoning', temp: 0.7, tempSrc: 'def' },
+  { id: 'gpt-oss-120b', detail: '131K · cheapest reasoner', temp: 1.0, tempSrc: 'rec' },         // gpt-oss reference: temperature 1.0
+  { id: 'DeepSeek-V3.1', detail: '131K · hardest problems', temp: 0.6, tempSrc: 'rec' },         // DeepSeek general recommendation 0.6 (0.0 for pure code/math)
+  { id: 'coder', detail: '196K · algorithms + debugging', temp: 0.2, tempSrc: 'rec' },           // code-completion: low temp for determinism
+  { id: 'gemma-4-31B-it', detail: '131K · multimodal', temp: 1.0, tempSrc: 'rec' },              // Gemma default temperature 1.0
+  { id: 'Llama-4-Maverick-17B-128E-Instruct', detail: '131K · multimodal', temp: 0.6, tempSrc: 'rec' }, // Llama 4 default 0.6
+  { id: 'Meta-Llama-3.3-70B-Instruct', detail: '131K · dense', temp: 0.6, tempSrc: 'rec' },      // Llama 3.x default 0.6
+  { id: 'Qwen3-32B', detail: '32K · 119 languages', temp: 0.7, tempSrc: 'rec' },                 // Qwen3 non-thinking recommended 0.7 (0.6 thinking)
 ];
-const SCX_TEMP_FALLBACK = 0.2; // unknown/live models default cold — safest for a coding tool.
+const SCX_TEMP_FALLBACK = SCX_TEMP_NEUTRAL; // unknown/live models -> neutral 0.7, never a silent cold guess.
 function modelTempDefault(id: string): number {
   const m = getModelCatalog().find((x) => x.id.toLowerCase() === (id || '').toLowerCase());
   return m && typeof m.temp === 'number' ? m.temp : SCX_TEMP_FALLBACK;
+}
+function modelTempSrc(id: string): string {
+  const m = getModelCatalog().find((x) => x.id.toLowerCase() === (id || '').toLowerCase());
+  return (m && m.tempSrc) ? m.tempSrc : 'def';
 }
 
 // .5227 — LIVE model list from the SCX API with a JSON cache + preseed fallback.
@@ -104,16 +112,50 @@ function modelTempDefault(id: string): number {
 // If the fetch fails we use the cache; if no cache, the hardcoded SCX_MODEL_CATALOG (preseed).
 let _liveModels: ScxModel[] | null = null;
 const _modelsCachePath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'models-cache.json');
-// .5227 — heal any catalog (live or older cache written before the temp field existed) so every
-// entry has a temp: backfill from the hardcoded defaults by id, else the cold fallback.
+const _modelsCacheBak = _modelsCachePath + '.bak';
+// .5228 — atomic + idempotent + backup write for ANY API-derived cache (never leave a half-written or
+// empty cache that could blank the dropdown). Write temp file -> validate -> rotate current to .bak -> rename.
+function writeCacheAtomic(pathTarget: string, data: any): void {
+  try {
+    const json = JSON.stringify(data);
+    if (!json || json === '[]' || json === 'null') { return; }        // never persist an empty/blank cache
+    const tmp = pathTarget + '.tmp';
+    fs.mkdirSync(path.dirname(pathTarget), { recursive: true });
+    fs.writeFileSync(tmp, json);
+    JSON.parse(fs.readFileSync(tmp, 'utf8'));                          // validate round-trip before committing
+    if (fs.existsSync(pathTarget)) { try { fs.copyFileSync(pathTarget, pathTarget + '.bak'); } catch { /* best effort */ } }
+    fs.renameSync(tmp, pathTarget);
+  } catch { /* keep prior cache */ }
+}
+// read a cache with fallback to its .bak, then to null (caller falls back to preseed) — never throws.
+function readCacheOrBak(pathTarget: string): ScxModel[] | null {
+  for (const p of [pathTarget, pathTarget + '.bak']) {
+    try { if (fs.existsSync(p)) { const c = JSON.parse(fs.readFileSync(p, 'utf8')); if (Array.isArray(c) && c.length) { return c; } } } catch { /* try next */ }
+  }
+  return null;
+}
+// .5228 — heal any catalog (live, or an older cache) with the CORRECT precedence so a stale cached copy
+// of an old hardcoded temp can never mask a catalog update:
+//   1. a genuine API-advertised temp (tempSrc === 'api') persists — the API is authoritative.
+//   2. otherwise the CURRENT hardcoded catalog value by id wins (catalog edits always propagate).
+//   3. otherwise the entry's own temp, else neutral 0.7.
 function healTemps(list: ScxModel[]): ScxModel[] {
-  const byId = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m.temp]));
-  return list.map((m) => ({ id: m.id, detail: m.detail, temp: typeof m.temp === 'number' ? m.temp : (byId.get((m.id || '').toLowerCase()) ?? SCX_TEMP_FALLBACK) }));
+  const byId = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
+  return list.map((m) => {
+    const k = byId.get((m.id || '').toLowerCase());
+    if (m.tempSrc === 'api' && typeof m.temp === 'number') {
+      return { id: m.id, detail: m.detail || (k ? k.detail : 'live'), temp: m.temp, tempSrc: 'api' };
+    }
+    if (k) { return { id: m.id, detail: k.detail, temp: k.temp, tempSrc: k.tempSrc || 'def' }; }
+    const temp = typeof m.temp === 'number' ? m.temp : SCX_TEMP_FALLBACK;
+    return { id: m.id, detail: m.detail || 'live', temp, tempSrc: m.tempSrc || 'def' };
+  });
 }
 function getModelCatalog(): ScxModel[] {
   if (_liveModels && _liveModels.length) { return healTemps(_liveModels); }
-  try { if (fs.existsSync(_modelsCachePath)) { const c = JSON.parse(fs.readFileSync(_modelsCachePath, 'utf8')); if (Array.isArray(c) && c.length) { return healTemps(c); } } } catch { /* ignore */ }
-  return SCX_MODEL_CATALOG; // preseed
+  const cached = readCacheOrBak(_modelsCachePath);
+  if (cached) { return healTemps(cached); }
+  return SCX_MODEL_CATALOG; // preseed — guaranteed non-empty
 }
 function fetchLiveModels(): void {
   const { apiKey, baseUrl } = getConfig();
@@ -125,13 +167,20 @@ function fetchLiveModels(): void {
       res.on('end', () => {
         try {
           const j = JSON.parse(buf);
-          const ids: string[] = Array.isArray(j.data) ? j.data.map((m: any) => m.id).filter(Boolean) : (Array.isArray(j.models) ? j.models.map((m: any) => m.id || m).filter(Boolean) : []);
-          if (ids.length) {
-            const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
-            _liveModels = ids.map((id) => { const k = known.get(id.toLowerCase()); return { id, detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK }; });
-            try { fs.mkdirSync(path.dirname(_modelsCachePath), { recursive: true }); fs.writeFileSync(_modelsCachePath, JSON.stringify(_liveModels)); } catch { /* ignore */ }
-          }
-        } catch { /* keep cache/preseed */ }
+          const rows: any[] = Array.isArray(j.data) ? j.data : (Array.isArray(j.models) ? j.models : []);
+          const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
+          const next: ScxModel[] = rows.map((r: any) => {
+            const id = typeof r === 'string' ? r : (r.id || r.model || r.name);
+            if (!id) { return null; }
+            const k = known.get(String(id).toLowerCase());
+            // .5228 — honour a temperature the API itself advertises (default_temperature / temperature /
+            // params.temperature) — that is authoritative over our hardcoded guess.
+            const apiTemp = (typeof r === 'object') ? (r.default_temperature ?? r.temperature ?? (r.params && r.params.temperature)) : undefined;
+            if (typeof apiTemp === 'number') { return { id, detail: k ? k.detail : 'live', temp: apiTemp, tempSrc: 'api' }; }
+            return { id, detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK, tempSrc: k ? (k.tempSrc || 'def') : 'def' };
+          }).filter(Boolean) as ScxModel[];
+          if (next.length) { _liveModels = next; writeCacheAtomic(_modelsCachePath, next); }  // only replace on a non-empty fetch
+        } catch { /* keep cache/preseed — dropdown never blanks */ }
       });
     });
     req.on('error', () => { /* keep cache/preseed */ });
@@ -655,6 +704,8 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       panel.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: attached.length });
     } else if (msg.type === 'listMcp') {
       panel.webview.postMessage({ type: 'notice', text: mcpSummary() });
+    } else if (msg.type === 'openCodex') {
+      vscode.commands.executeCommand('kritical.scxcode.openCodex');
     } else if (msg.type === 'config') {
       const cfg = getConfig();
       panel.webview.postMessage({ type: 'config', model: cfg.defaultModel, models: getModelCatalog(), keyCount: cfg.apiKeys.length,
@@ -694,6 +745,14 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
 .controls { display: flex; gap: 12px; align-items: center; padding: 5px 12px; background: var(--kr-panel); border-bottom: 1px solid var(--kr-border); flex-wrap: wrap; flex-shrink: 0; }
 .controls label { font-size: 11px; opacity: 0.85; display: flex; gap: 4px; align-items: center; }
 .controls select, .adv select, .adv input { background: var(--kr-bg); color: var(--kr-fg); border: 1px solid var(--kr-border); border-radius: 3px; font-size: 11px; padding: 1px 3px; }
+/* .5228 — Windows/Chromium renders native <option> popups with OS list colors (white bg), which produced
+   white-on-white unreadable text that only appeared on hover. Force VS Code dropdown/list theme colors so
+   every option is readable in the closed control AND the open popup, in any theme. */
+select option, .model-select option { background: var(--vscode-dropdown-listBackground, var(--vscode-editorWidget-background, #252526)); color: var(--vscode-dropdown-foreground, var(--vscode-editor-foreground, #e5e5e5)); }
+select option:checked { background: var(--vscode-list-activeSelectionBackground, #094771); color: var(--vscode-list-activeSelectionForeground, #ffffff); }
+/* the closed model-select sits on the navy header; give it explicit dark-on-light so its own text never
+   collapses into the header when a light theme flips --vscode vars. */
+.model-select:focus { outline: 1px solid var(--kr-accent); }
 .adv-btn { margin-left: auto; background: transparent; border: 1px solid var(--kr-border); color: var(--kr-fg); border-radius: 3px; cursor: pointer; padding: 1px 7px; font-size: 12px; }
 .adv-btn:hover, .adv-btn.on { border-color: var(--kr-accent); color: var(--kr-accent); }
 .adv { display: none; gap: 14px; align-items: center; padding: 5px 12px; background: var(--kr-panel); border-bottom: 1px solid var(--kr-border); flex-shrink: 0; }
@@ -739,7 +798,7 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
   <button class="adv-btn" id="advBtn" title="Advanced options">⚙</button>
 </div>
 <div class="adv" id="adv">
-  <label>Temp <input type="range" id="temp" min="0" max="1" step="0.1" value="0.2"><span id="tempVal">0.2</span></label>
+  <label title="Sampling temperature. The source marker shows whether this is the model's published recommendation, a neutral default (no published value), from the live API, or your manual override.">Temp <input type="range" id="temp" min="0" max="1" step="0.1" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
   <label>Provider <select id="provider"><option value="auto">Auto (SCX→Claude CLI)</option><option value="scx-native">SCX only</option><option value="claude-code-cli">Claude CLI only</option></select></label>
 </div>
 <div id="chat"></div>
@@ -748,6 +807,7 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
     <button class="tool-btn" id="tbUpload" title="Upload a file into the next message">📎 File</button>
     <button class="tool-btn" id="tbRepo" title="Attach a workspace file summary">📁 Repo</button>
     <button class="tool-btn" id="tbMcp" title="MCP servers &amp; tools">🔌 MCP</button>
+    <button class="tool-btn" id="tbCodex" title="Open SCX Codex (Kritical/SCX-branded Codex CLI) in a terminal — never touches your real codex config">✦ SCX Codex</button>
     <span class="ctx-chip" id="ctxChip"></span>
   </div>
   <div class="input-row">
@@ -843,15 +903,21 @@ const providerEl = document.getElementById('provider');
 const advBtn = document.getElementById('advBtn');
 const advPanel = document.getElementById('adv');
 const ctxChip = document.getElementById('ctxChip');
-// .5227 — per-model recommended temperature defaults (embedded at render). Selecting a model snaps
-// the slider to its default UNLESS the operator has manually overridden the temperature this session.
+// .5228 — per-model temperature defaults + SOURCE (embedded at render). Selecting a model snaps the
+// slider to its default UNLESS the operator overrode temperature this session. The source marker tells
+// the operator whether the value is a published recommendation, a neutral default, or from the live API.
 const _modelTemps = ${JSON.stringify(Object.fromEntries(getModelCatalog().map((m) => [m.id, m.temp])))};
+const _modelTempSrcs = ${JSON.stringify(Object.fromEntries(getModelCatalog().map((m) => [m.id, m.tempSrc || 'def'])))};
 const _tempFallback = ${SCX_TEMP_FALLBACK};
+const _tempSrcLabel = { rec: 'recommended', def: 'neutral default', api: 'from API' };
+const tempSrcEl = document.getElementById('tempSrc');
 let _tempUserSet = false;
 function _applyModelTemp(id, post) {
-  if (_tempUserSet) return;                                   // respect an explicit operator override
+  if (_tempUserSet) { if (tempSrcEl) tempSrcEl.textContent = '(your override)'; return; }  // respect operator override
   var t = (_modelTemps && typeof _modelTemps[id] === 'number') ? _modelTemps[id] : _tempFallback;
+  var s = (_modelTempSrcs && _modelTempSrcs[id]) ? _modelTempSrcs[id] : 'def';
   tempEl.value = String(t); tempVal.textContent = String(t);
+  if (tempSrcEl) tempSrcEl.textContent = '(' + (_tempSrcLabel[s] || 'default') + ')';
   if (post) vscode.postMessage({ type: 'setConfig', key: 'temperature', value: t });
 }
 modelEl.onchange = () => { vscode.postMessage({ type: 'setConfig', key: 'defaultModel', value: modelEl.value }); _applyModelTemp(modelEl.value, true); };
@@ -865,6 +931,7 @@ advBtn.onclick = () => { advPanel.classList.toggle('open'); advBtn.classList.tog
 document.getElementById('tbUpload').onclick = () => vscode.postMessage({ type: 'uploadFile' });
 document.getElementById('tbRepo').onclick = () => vscode.postMessage({ type: 'attachRepo' });
 document.getElementById('tbMcp').onclick = () => vscode.postMessage({ type: 'listMcp' });
+document.getElementById('tbCodex').onclick = () => vscode.postMessage({ type: 'openCodex' });
 clearBtn.onclick = () => {
   chat.innerHTML = '';
   sessionInTokens = 0; sessionOutTokens = 0;
@@ -931,7 +998,7 @@ window.addEventListener('message', (e) => {
 // the real defaultModel (and the '…' placeholder resolves).
 vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.13</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.14</div>
 </body></html>`;
 }
 
@@ -1033,6 +1100,8 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
         view.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: this._attached.length });
       } else if (msg.type === 'listMcp') {
         view.webview.postMessage({ type: 'notice', text: mcpSummary() });
+      } else if (msg.type === 'openCodex') {
+        vscode.commands.executeCommand('kritical.scxcode.openCodex');
       } else if (msg.type === 'config') {
         const cfg = getConfig();
         view.webview.postMessage({
@@ -1052,6 +1121,72 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
   }
 }
 
+// .5228 — SCX CODEX inside VS Code (the recurring "where is SCX Codex in the plugin" ask).
+// Opens an integrated terminal running the Kritical/SCX-branded Codex wrapper. The wrapper is HR29-safe
+// (reads SCX_API_KEY from HKCU, routes via the local LiteLLM proxy, restores env on exit) — it NEVER
+// touches the operator's real `codex` config, so this coexists with a plain `codex` install.
+function resolveCodexWrapper(context: vscode.ExtensionContext): string | null {
+  const override = vscode.workspace.getConfiguration('kritical.scxcode').get<string>('codexWrapperPath', '');
+  const candidates: string[] = [];
+  if (override) { candidates.push(override); }
+  for (const f of vscode.workspace.workspaceFolders || []) {
+    candidates.push(path.join(f.uri.fsPath, 'codex-wrapper', 'kritical-codex.ps1'));
+    candidates.push(path.join(f.uri.fsPath, 'Kritical.SCXCode', 'codex-wrapper', 'kritical-codex.ps1'));
+  }
+  candidates.push(path.join(context.extensionPath, 'codex-wrapper', 'kritical-codex.ps1'));
+  // last resort: the known repo location on this machine
+  candidates.push(path.join(process.env.USERPROFILE || '', 'OneDrive - Kritical Pty Ltd', 'Github', 'Kritical.SCXCode', 'codex-wrapper', 'kritical-codex.ps1'));
+  for (const c of candidates) { try { if (c && fs.existsSync(c)) { return c; } } catch { /* next */ } }
+  return null;
+}
+function cmdOpenCodex(context: vscode.ExtensionContext) {
+  const wrapper = resolveCodexWrapper(context);
+  if (!wrapper) {
+    vscode.window.showWarningMessage(
+      'SCX Codex wrapper (kritical-codex.ps1) not found. Set "kritical.scxcode.codexWrapperPath" to its location.',
+      'Open Settings',
+    ).then((pick) => { if (pick === 'Open Settings') { vscode.commands.executeCommand('workbench.action.openSettings', 'kritical.scxcode.codexWrapperPath'); } });
+    return;
+  }
+  const term = vscode.window.createTerminal({ name: 'SCX Codex', iconPath: new vscode.ThemeIcon('sparkle') });
+  // -NoExit keeps the Codex session interactive; the wrapper self-sets/-restores SCX env per HR29.
+  term.sendText(`pwsh -NoExit -File "${wrapper}"`, true);
+  term.show();
+  getOutputChannel().appendLine('SCX Codex launched via ' + wrapper);
+}
+// .5228 — honest sideload "update" path. A VSIX installed from disk cannot use VS Code's marketplace
+// auto-update; this command finds the newest built SCXCode-*.vsix next to the extension/repo, compares
+// it to the running version, and offers to install it.
+function cmdCheckUpdate(context: vscode.ExtensionContext) {
+  const running = (() => { try { return JSON.parse(fs.readFileSync(path.join(context.extensionPath, 'package.json'), 'utf8')).version; } catch { return '?'; } })();
+  const searchDirs = [context.extensionPath];
+  for (const f of vscode.workspace.workspaceFolders || []) {
+    searchDirs.push(path.join(f.uri.fsPath, 'src'));
+    searchDirs.push(path.join(f.uri.fsPath, 'Kritical.SCXCode', 'src'));
+  }
+  searchDirs.push(path.join(process.env.USERPROFILE || '', 'OneDrive - Kritical Pty Ltd', 'Github', 'Kritical.SCXCode', 'src'));
+  let best: { file: string; ver: string } | null = null;
+  const verNum = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
+  const gt = (a: string, b: string) => { const x = verNum(a), y = verNum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) { return (x[i] || 0) > (y[i] || 0); } } return false; };
+  for (const d of searchDirs) {
+    try {
+      for (const fn of fs.readdirSync(d)) {
+        const m = fn.match(/^SCXCode-(\d+\.\d+\.\d+)\.vsix$/);
+        if (m && (!best || gt(m[1], best.ver))) { best = { file: path.join(d, fn), ver: m[1] }; }
+      }
+    } catch { /* dir missing */ }
+  }
+  if (!best) { vscode.window.showInformationMessage(`SCXCode ${running} — no newer .vsix found on disk to update from.`); return; }
+  if (!gt(best.ver, running)) { vscode.window.showInformationMessage(`SCXCode ${running} is up to date (newest .vsix on disk is ${best.ver}).`); return; }
+  vscode.window.showInformationMessage(`SCXCode update available: ${running} → ${best.ver}. Install now?`, 'Install', 'Cancel').then((pick) => {
+    if (pick !== 'Install') { return; }
+    const term = vscode.window.createTerminal({ name: 'SCXCode Update' });
+    term.sendText(`code-insiders --install-extension "${best!.file}" --force`, true);
+    term.show();
+    vscode.window.showInformationMessage(`Installing SCXCode ${best!.ver}. Reload window when the install completes.`, 'Reload').then((p) => { if (p === 'Reload') { vscode.commands.executeCommand('workbench.action.reloadWindow'); } });
+  });
+}
+
 export function activate(context: vscode.ExtensionContext) {
   fetchLiveModels(); // .5227 — refresh the model cache from the SCX API on startup (falls back to cache/preseed)
   const cmds: Array<[string, (...args: any[]) => any]> = [
@@ -1068,6 +1203,8 @@ export function activate(context: vscode.ExtensionContext) {
     ['kritical.scxcode.explainFile', cmdExplainFile],
     ['kritical.scxcode.generateTests', cmdGenerateTests],
     ['kritical.scxcode.muxQuery', cmdMuxQuery],
+    ['kritical.scxcode.openCodex', () => cmdOpenCodex(context)],
+    ['kritical.scxcode.checkUpdate', () => cmdCheckUpdate(context)],
   ];
   for (const [id, fn] of cmds) {
     context.subscriptions.push(vscode.commands.registerCommand(id, fn));
