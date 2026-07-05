@@ -12,6 +12,7 @@
 
 import * as vscode from 'vscode';
 import * as https from 'https';
+import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -65,6 +66,13 @@ function saveKeyRotation(rotation: number): void {
 }
 let _keyRotation = loadKeyRotation();
 
+// .5232 — the local LiteLLM router (see litellm/Install-KritScxLiteLLM.ps1 — binds 127.0.0.1:4180,
+// localhost-only per HR29). It presents an OpenAI-shape /v1 AND an Anthropic-shape /v1/messages
+// passthrough, so the extension's existing Anthropic-shape POST works unchanged against it.
+// This is the ADDITIVE layer: with routerEnabled OFF we go DIRECT to SCX and always work.
+const KRIT_ROUTER_URL = 'http://127.0.0.1:4180';
+const KRIT_ROUTER_HEALTH_PATH = '/health/liveliness';
+
 function getConfig() {
   const c = vscode.workspace.getConfiguration('kritical.scxcode');
   // VS Code auto-substitutes ${env:SCX_API_KEY} for the apiKey default.
@@ -93,6 +101,11 @@ function getConfig() {
     // .5165e — auto-context wiring
     autoContext: c.get<'off' | 'file' | 'file+selection' | 'workspace-tree'>('autoContext', 'file+selection'),
     autoContextMaxChars: c.get<number>('autoContextMaxChars', 8000),
+    // .5232 — LiteLLM router toggle (HR29 additive). OFF = direct to baseUrl (always works);
+    // ON = route via the local router. The effective base is computed at request time (see
+    // effectiveBase / scxRequest) so this NEVER overwrites the operator's baseUrl setting.
+    routerEnabled: c.get<boolean>('routerEnabled', false),
+    routerUrl: c.get<string>('routerUrl', KRIT_ROUTER_URL),
     // .5165h — provider selection + claude-code CLI fallback path
     provider: c.get<'auto' | 'scx-native' | 'claude-code-cli'>('provider', 'auto'),
     claudeCliPath: c.get<string>('claudeCliPath', 'claude'),
@@ -102,6 +115,72 @@ function getConfig() {
     concurrency: c.get<number>('concurrency', 1),
     temperature: c.get<number>('temperature', 0.2),
   };
+}
+
+// .5232 — ROUTER LAYER (HR29 additive). The effective base for a request is computed here, never by
+// mutating the operator's baseUrl setting. Router health is probed with a short timeout; if the router
+// is enabled but not up, we transparently fall back to DIRECT and record why so the status strip can
+// show a subtle hint. This keeps HR29's "layer OFF (or failing) → underlying still works" contract.
+type RouterState = { enabled: boolean; reachable: boolean; usingRouter: boolean; base: string; hint: string };
+let _lastRouterState: RouterState = { enabled: false, reachable: false, usingRouter: false, base: '', hint: '' };
+
+// Probe an arbitrary localhost router URL's liveliness endpoint. Never throws; resolves false on any error.
+function probeRouterUrl(routerUrl: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(KRIT_ROUTER_HEALTH_PATH, routerUrl);
+      const req = http.request(
+        { host: u.hostname, port: u.port || 80, path: u.pathname, method: 'GET', timeout: 1200 },
+        (r) => { r.resume(); resolve((r.statusCode || 0) >= 200 && (r.statusCode || 0) < 500); },
+      );
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+      req.end();
+    } catch { resolve(false); }
+  });
+}
+
+// Resolve the effective base URL for a chat/models request. When the router is enabled AND reachable we
+// route via it; otherwise we fall back to the configured direct baseUrl (HR29 baseline). The result is
+// cached in _lastRouterState so the status strip can reflect it without re-probing.
+async function resolveEffectiveBase(): Promise<RouterState> {
+  const cfg = getConfig();
+  const direct = cfg.baseUrl;
+  if (!cfg.routerEnabled) {
+    _lastRouterState = { enabled: false, reachable: false, usingRouter: false, base: direct, hint: '' };
+    return _lastRouterState;
+  }
+  const reachable = await probeRouterUrl(cfg.routerUrl);
+  _lastRouterState = reachable
+    ? { enabled: true, reachable: true, usingRouter: true, base: cfg.routerUrl, hint: '' }
+    : { enabled: true, reachable: false, usingRouter: false, base: direct, hint: 'router unreachable — using direct' };
+  return _lastRouterState;
+}
+
+// Fire an Anthropic-shape request against a base URL, choosing http vs https by the URL's protocol and
+// honouring an explicit port (the router is plain http on 127.0.0.1:4180; SCX is https on 443). Shared by
+// scxPost and fetchLiveModels so both honour the router toggle identically.
+function requestJson(base: string, apiPath: string, method: 'GET' | 'POST', headers: Record<string, string>, body?: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    let url: URL;
+    try { url = new URL(apiPath, base); } catch (e) { reject(e); return; }
+    const isHttps = url.protocol === 'https:';
+    const transport = isHttps ? https : http;
+    const opts = {
+      method,
+      hostname: url.hostname,
+      port: url.port ? Number(url.port) : (isHttps ? 443 : 80),
+      path: url.pathname,
+      headers,
+    };
+    const req = transport.request(opts, (res) => {
+      let buf = ''; res.on('data', (c) => (buf += c));
+      res.on('end', () => resolve({ status: res.statusCode || 0, body: buf }));
+    });
+    req.on('error', reject);
+    if (body) { req.write(body); }
+    req.end();
+  });
 }
 
 // .5213 — the SCX model catalog surfaced in the in-panel dropdown (label + one-line detail).
@@ -239,13 +318,12 @@ function notifyModelCorrected(from: string, to: string): void {
   ).then((pick) => { if (pick === 'Pick model') { vscode.commands.executeCommand('kritical.scxcode.pickModel'); } });
 }
 function fetchLiveModels(): void {
-  const { apiKey, baseUrl } = getConfig();
+  const { apiKey } = getConfig();
   if (!apiKey) { return; }
-  try {
-    const url = new URL('/v1/models', baseUrl);
-    const req = https.request({ method: 'GET', hostname: url.hostname, path: url.pathname, headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'authorization': `Bearer ${apiKey}` } }, (res) => {
-      let buf = ''; res.on('data', (c) => (buf += c));
-      res.on('end', () => {
+  // .5232 — honour the router toggle for the model list too (effective base, else direct fallback).
+  resolveEffectiveBase().then((rs) => {
+    requestJson(rs.base, '/v1/models', 'GET', { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'authorization': `Bearer ${apiKey}` })
+      .then(({ body: buf }) => {
         try {
           const j = JSON.parse(buf);
           const rows: any[] = Array.isArray(j.data) ? j.data : (Array.isArray(j.models) ? j.models : []);
@@ -262,11 +340,9 @@ function fetchLiveModels(): void {
           }).filter(Boolean) as ScxModel[];
           if (next.length) { _liveModels = next; writeCacheAtomic(_modelsCachePath, next); }  // only replace on a non-empty fetch
         } catch { /* keep cache/preseed — dropdown never blanks */ }
-      });
-    });
-    req.on('error', () => { /* keep cache/preseed */ });
-    req.end();
-  } catch { /* keep cache/preseed */ }
+      })
+      .catch(() => { /* keep cache/preseed */ });
+  }).catch(() => { /* keep cache/preseed */ });
 }
 
 // .5213 — read-only MCP-server summary for the panel's 🔌 MCP button (Codex config.toml).
@@ -444,7 +520,7 @@ function buildAutoContext(): string {
 // ────────────────────────────────────────────────────────────────
 
 async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, keyOverride: string | null = null): Promise<ScxCompletionResponse> {
-  const { apiKey, baseUrl, systemPrompt, temperature } = getConfig();
+  const { apiKey, systemPrompt, temperature } = getConfig();
   const useKey = keyOverride || apiKey;
   if (!useKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
   model = normalizeModelId(model);       // .5231 — match the endpoint's exact id (direct vs proxy casing)
@@ -455,33 +531,17 @@ async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, k
   const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens, temperature: temp };
   if (systemPrompt) body.system = systemPrompt;
 
-  return new Promise((resolve, reject) => {
-    const url = new URL('/v1/messages', baseUrl);
-    const req = https.request({
-      method: 'POST',
-      hostname: url.hostname,
-      path: url.pathname,
-      headers: {
-        'x-api-key': useKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-    }, (res) => {
-      let buf = '';
-      res.on('data', (c) => (buf += c));
-      res.on('end', () => {
-        if (res.statusCode! >= 400) {
-          reject(new ScxHttpError(res.statusCode!, buf));
-          return;
-        }
-        try { resolve(JSON.parse(buf)); }
-        catch (e) { reject(new Error(`SCX response parse failed: ${(e as Error).message}\n${buf.slice(0, 300)}`)); }
-      });
-    });
-    req.on('error', reject);
-    req.write(JSON.stringify(body));
-    req.end();
-  });
+  // .5232 — resolve the effective base at request time (router if enabled+reachable, else direct).
+  // HR1 intact: still SCX_API_KEY only. Router-unreachable → transparent direct fallback (no hard fail).
+  const rs = await resolveEffectiveBase();
+  const { status, body: buf } = await requestJson(rs.base, '/v1/messages', 'POST', {
+    'x-api-key': useKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  }, JSON.stringify(body));
+  if (status >= 400) { throw new ScxHttpError(status, buf); }
+  try { return JSON.parse(buf); }
+  catch (e) { throw new Error(`SCX response parse failed: ${(e as Error).message}\n${buf.slice(0, 300)}`); }
 }
 
 class ScxHttpError extends Error {
@@ -864,9 +924,11 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
     } else if (msg.type === 'config') {
       const cfg = getConfig();
       let mcpCount = 0; try { mcpCount = Object.keys(readCodexConfig().mcp_servers || {}).length; } catch { /* none */ }
+      const rs = await resolveEffectiveBase();   // .5232 — router status for the strip + toggle
       panel.webview.postMessage({ type: 'config', model: cfg.defaultModel, models: getModelCatalog(), keyCount: cfg.apiKeys.length,
         autoContext: cfg.autoContext, maxTokens: cfg.maxTokens, concurrency: cfg.concurrency, temperature: cfg.temperature, provider: cfg.provider,
-        baseUrl: cfg.baseUrl, apiKeySet: !!cfg.apiKey, mcpCount });
+        baseUrl: cfg.baseUrl, apiKeySet: !!cfg.apiKey, mcpCount,
+        routerEnabled: cfg.routerEnabled, routerUsing: rs.usingRouter, routerReachable: rs.reachable, routerHint: rs.hint, effectiveBase: rs.base });
     }
   });
   panel.webview.postMessage({ type: 'ready' });
@@ -1723,6 +1785,25 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
 .scx-status .dot.on { background: #42c26b; box-shadow: 0 0 6px #42c26b88; }
 .scx-status .dot.off { background: #e3b341; }
 .scx-status .cap { color: var(--kr-accent); }
+/* .5232 — Router on/off pill in the status strip. Glass/navy-cyan aesthetic to match the header.
+   OFF (default, HR29 baseline) = muted; ON = cyan-lit with a sliding knob. Fallback (enabled but the
+   router is unreachable) = amber to signal "using direct". */
+.router-pill { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; cursor: pointer; user-select: none;
+  padding: 2px 8px 2px 6px; border-radius: 11px; border: 1px solid var(--kr-border);
+  background: rgba(255,255,255,0.04); font-size: 11px; line-height: 1; transition: border-color .15s, background .15s; }
+.router-pill:hover { border-color: var(--kr-accent); }
+.router-pill:focus-visible { outline: 1px solid var(--kr-accent); outline-offset: 1px; }
+.router-pill .rp-label { letter-spacing: 0.2px; opacity: 0.85; }
+.router-pill .rp-switch { position: relative; width: 26px; height: 14px; border-radius: 8px; background: #555; flex: none; transition: background .15s; }
+.router-pill .rp-knob { position: absolute; top: 1px; left: 1px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.router-pill .rp-state { font-size: 10px; opacity: 0.6; min-width: 22px; }
+.router-pill.on { border-color: var(--kr-accent); background: rgba(21,175,209,0.10); }
+.router-pill.on .rp-switch { background: var(--kr-accent); box-shadow: 0 0 6px rgba(21,175,209,0.5); }
+.router-pill.on .rp-knob { left: 13px; }
+.router-pill.on .rp-label { opacity: 1; color: var(--kr-accent); }
+.router-pill.fallback { border-color: #e3b341; background: rgba(227,179,65,0.10); }
+.router-pill.fallback .rp-switch { background: #e3b341; }
+.router-pill.fallback .rp-label { color: #e3b341; opacity: 1; }
 .msg.attach { background: transparent; border: 1px solid var(--kr-border); border-left: 3px solid var(--kr-accent); padding: 0; max-width: 100%; overflow: hidden; }
 .attach-head { padding: 7px 10px; cursor: pointer; font-size: 12px; user-select: none; display: flex; align-items: center; gap: 5px; }
 .attach-head:hover { background: rgba(255,255,255,0.03); }
@@ -1767,6 +1848,12 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
 </div>
 <div class="scx-status" id="scxStatus" title="Live SCX connection status">
   <span class="dot" id="scxDot"></span><span id="scxStatusText">connecting…</span>
+  <span class="router-pill" id="routerPill" role="switch" aria-checked="false" tabindex="0"
+    title="Router OFF — requests go DIRECT to SCX (HR29 baseline, always works). Turn ON to route via the local LiteLLM router at 127.0.0.1:4180. If the router is enabled but unreachable, SCXCode falls back to direct automatically.">
+    <span class="rp-label">Router</span>
+    <span class="rp-switch"><span class="rp-knob"></span></span>
+    <span class="rp-state" id="routerState">off</span>
+  </span>
 </div>
 <div id="chat"></div>
 <div class="input">
@@ -1918,6 +2005,32 @@ providerEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'provid
 tempEl.oninput = () => { tempVal.textContent = tempEl.value; };
 tempEl.onchange = () => { _tempUserSet = true; vscode.postMessage({ type: 'setConfig', key: 'temperature', value: parseFloat(tempEl.value) }); };
 advBtn.onclick = () => { advPanel.classList.toggle('open'); advBtn.classList.toggle('on'); };
+// .5232 — Router on/off pill. Optimistically flips its own visual, posts setConfig routerEnabled, and
+// re-requests config so the host can re-probe the router and correct the pill (on / fallback / off).
+const routerPill = document.getElementById('routerPill');
+const routerStateEl = document.getElementById('routerState');
+let _routerEnabled = false;
+function _renderRouter(enabled, using, reachable, hint, base) {
+  _routerEnabled = !!enabled;
+  var fallback = enabled && !using;   // enabled but the router wasn't reachable → running direct
+  routerPill.classList.toggle('on', !!using);
+  routerPill.classList.toggle('fallback', !!fallback);
+  routerPill.setAttribute('aria-checked', enabled ? 'true' : 'false');
+  if (routerStateEl) routerStateEl.textContent = using ? 'on' : (fallback ? 'direct' : 'off');
+  var where = using ? ('routing via local LiteLLM router — ' + (base || '127.0.0.1:4180'))
+    : (fallback ? ('router ON but unreachable — falling back DIRECT (' + (base || 'SCX') + ')')
+                : 'direct to SCX (HR29 baseline, always works)');
+  routerPill.title = 'Router ' + (enabled ? 'ON' : 'OFF') + ' — ' + where +
+    '.\\nClick to toggle. ON = route via 127.0.0.1:4180; OFF = direct to SCX.';
+}
+function _toggleRouter() {
+  var next = !_routerEnabled;
+  _renderRouter(next, next, next, '', '');   // optimistic; host re-probe corrects to fallback if unreachable
+  vscode.postMessage({ type: 'setConfig', key: 'routerEnabled', value: next });
+  setTimeout(function () { vscode.postMessage({ type: 'config' }); }, 250);
+}
+routerPill.onclick = _toggleRouter;
+routerPill.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _toggleRouter(); } };
 document.getElementById('tbFiles').onclick = () => vscode.postMessage({ type: 'uploadFile' });
 document.getElementById('tbFolder').onclick = () => vscode.postMessage({ type: 'uploadFolder' });
 document.getElementById('tbRepo').onclick = () => vscode.postMessage({ type: 'attachRepo' });
@@ -1974,14 +2087,21 @@ window.addEventListener('message', (e) => {
     if (typeof m.temperature === 'number') { tempEl.value = String(m.temperature); tempVal.textContent = String(m.temperature); }
     if (m.keyCount > 1) modelEl.title = 'SCX model · ' + m.keyCount + ' keys available';
     // .5231 — connection / capability status strip
+    // .5232 — reflect the router state: the strip host shows the EFFECTIVE base (router when routing via
+    // it, else direct), and a subtle hint appears when the router is enabled but we fell back to direct.
     var _dot = document.getElementById('scxDot'), _st = document.getElementById('scxStatusText');
+    if (typeof m.routerEnabled !== 'undefined') { _renderRouter(m.routerEnabled, m.routerUsing, m.routerReachable, m.routerHint, m.effectiveBase); }
     if (_st) {
-      var host = (m.baseUrl || '').replace(/^https?:\\/\\//, '') || 'SCX';
+      var effBase = m.routerUsing ? (m.effectiveBase || m.baseUrl) : (m.baseUrl || '');
+      var host = (effBase || '').replace(/^https?:\\/\\//, '') || 'SCX';
       var connected = !!m.apiKeySet;
       _dot.className = 'dot ' + (connected ? 'on' : 'off');
       var keyN = m.keyCount || 1;
+      var routerLabel = m.routerUsing ? ' · <span class="cap">↺ router</span>'
+        : (m.routerEnabled ? ' · <span style="color:#e3b341;">↺ router unreachable → direct</span>' : '');
       _st.innerHTML = (connected ? '● SCX connected' : '○ SCX key not set') + ' · ' + host + ' · ' + esc(m.model || '') +
         ' · ' + keyN + ' key' + (keyN > 1 ? 's' : '') +
+        routerLabel +
         ' · <span class="cap">' + (m.mcpCount || 0) + ' MCP</span>' +
         ' · <span class="cap">edits files ✓</span>' +
         ' · <span class="cap">agentic via SCX Codex ✓</span>';
@@ -2115,6 +2235,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
       } else if (msg.type === 'config') {
         const cfg = getConfig();
         let mcpCount = 0; try { mcpCount = Object.keys(readCodexConfig().mcp_servers || {}).length; } catch { /* none */ }
+        const rs = await resolveEffectiveBase();   // .5232 — router status for the strip + toggle
         view.webview.postMessage({
           type: 'config',
           model: cfg.defaultModel,
@@ -2128,6 +2249,11 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           baseUrl: cfg.baseUrl,
           apiKeySet: !!cfg.apiKey,
           mcpCount,
+          routerEnabled: cfg.routerEnabled,
+          routerUsing: rs.usingRouter,
+          routerReachable: rs.reachable,
+          routerHint: rs.hint,
+          effectiveBase: rs.base,
         });
       }
     });
