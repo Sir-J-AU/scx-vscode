@@ -155,5 +155,5 @@ if __name__ == "__main__":
     write_json_atomic(p, {"a": 2})
     assert read_json_or_bak(p) == {"a": 2}
     os.remove(p)
-    assert read_json_or_bak(p) == {"a": 2}          # .bak fallback? no—bak holds {"a":1}
-    print("smoke notes: primary read ok; bak holds prior version:", read_json_or_bak(p))
+    assert read_json_or_bak(p) == {"a": 1}          # .bak fallback returns the PRIOR version by design
+    print("smoke OK: atomic write, primary read, .bak prior-version fallback all verified")
