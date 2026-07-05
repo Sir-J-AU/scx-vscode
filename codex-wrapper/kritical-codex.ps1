@@ -49,9 +49,12 @@ $shimPort    = 4199
 $shimBase    = "http://127.0.0.1:$shimPort/v1"
 $scxDirect   = 'https://api.scx.ai/v1'
 
-# Models proven to emit tool calls (agentic) on SCX — see spec §1f. Others (MAGPiE, Qwen3-32B) are
-# chat-only and must NOT be used for an agentic codex session.
-$agenticModels = @('gpt-oss-120b','MiniMax-M2.7','coder','gemma-4-31B-it','Meta-Llama-3.3-70B-Instruct','Llama-4-Maverick-17B-128E-Instruct')
+# Models proven to drive agentic codex on SCX (emit tool calls AND accepted by codex through the shim).
+# NOTE: 'coder' emits function_calls fine on the raw API but codex rejects it with model_not_found
+# (reserved-name clash) — so it's excluded here; use it in the chat panel instead. MAGPiE / Qwen3-32B
+# are chat-only (no tool calls). See spec §1f.
+$agenticModels = @('gpt-oss-120b','MiniMax-M2.7','gemma-4-31B-it','Meta-Llama-3.3-70B-Instruct','Llama-4-Maverick-17B-128E-Instruct')
+$defaultAgentic = 'gpt-oss-120b'
 
 # HR1/HR29: SCX key only. We never read/write OPENAI_* or ANTHROPIC_*.
 $scxKey = [Environment]::GetEnvironmentVariable('SCX_API_KEY','User'); if (-not $scxKey) { $scxKey = $env:SCX_API_KEY }
@@ -72,10 +75,10 @@ if ($Model) {
     $match = $agenticModels | Where-Object { $_ -ieq $Model } | Select-Object -First 1
     if ($match) { $Model = $match }
     elseif ($Model -notin $agenticModels) {
-        Write-Host "  '$Model' is chat-only (not agentic on SCX) — using 'coder' for this session. Override with -Model." -ForegroundColor DarkYellow
-        $Model = 'coder'
+        Write-Host "  '$Model' can't drive agentic codex on SCX — using '$defaultAgentic' this session. Override with -Model." -ForegroundColor DarkYellow
+        $Model = $defaultAgentic
     }
-} else { $Model = 'coder' }
+} else { $Model = $defaultAgentic }
 
 # ------------------------------------------------------------
 # Endpoint: shim (agentic) unless -NoShim
