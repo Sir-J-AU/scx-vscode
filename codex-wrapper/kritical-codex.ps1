@@ -104,11 +104,42 @@ if (-not $BaseUrl) {
     }
 }
 
+# .5231 — map a direct-SCX model id (what the VS Code extension records) to the local
+# LiteLLM proxy alias codex must request. Keeps SCX Codex on the SAME model as the chat panel.
+$scxDirectToProxyAlias = @{
+    'minimax-m2.7'                        = 'minimax-m2.7'
+    'magpie'                              = 'magpie'
+    'gpt-oss-120b'                        = 'gpt-oss-120b'
+    'deepseek-v3.1'                       = 'deepseek-v3.1'
+    'coder'                               = 'scx-coder'
+    'gemma-4-31b-it'                      = 'gemma-4'
+    'qwen3-32b'                           = 'qwen3-32b'
+    'meta-llama-3.3-70b-instruct'         = 'llama-3.3-70b'
+    'llama-4-maverick-17b-128e-instruct'  = 'llama-4-maverick'
+    'claude-sonnet-4-6'                   = 'claude-sonnet-4-6'
+}
+function Resolve-CurrentModelAlias {
+    # Read the model the VS Code extension is currently using (operator .5231 request:
+    # "default for codex from the same list — use current selection in the extension").
+    $sharedPath = Join-Path $env:USERPROFILE '.kritical-scx\current-model.json'
+    if (-not (Test-Path $sharedPath)) { return $null }
+    try {
+        $picked = (Get-Content -LiteralPath $sharedPath -Raw | ConvertFrom-Json).id
+        if (-not $picked) { return $null }
+        $key = $picked.ToLowerInvariant()
+        if ($scxDirectToProxyAlias.ContainsKey($key)) { return $scxDirectToProxyAlias[$key] }
+        return $key  # already a proxy-shaped alias (or unknown — proxy validates)
+    } catch { return $null }
+}
+
 if (-not $Model) {
     # SCX is the ONLY thing kcodex overrides, and ONLY with an SCX key + healthy local proxy.
     # Otherwise: leave everything unset -> stock codex uses its NATIVE OpenAI/ChatGPT auth + model.
     # We deliberately do NOT touch OpenAI, Anthropic, or Google routing/keys (operator .5186).
-    if ($scxKey -and $BaseUrl -eq 'http://127.0.0.1:4180') { $Model = 'scx-coder' }
+    if ($scxKey -and $BaseUrl -eq 'http://127.0.0.1:4180') {
+        $Model = Resolve-CurrentModelAlias   # follow the extension's current selection...
+        if (-not $Model) { $Model = 'scx-coder' }   # ...else the SCX coding default
+    }
     else { $Model = $null }  # pure passthrough — native codex, native keys (HR29)
 }
 
@@ -178,21 +209,43 @@ if (-not $NoLog) {
 }
 
 # ------------------------------------------------------------
-# Confirm codex CLI is present
+# Confirm codex CLI is present (robust — Get-Command alone misses the npm
+# .cmd/.ps1 shim in some child-process PATHs, esp. on Windows ARM64 where the
+# real binary lives deep under the npm vendor tree). .5231
 # ------------------------------------------------------------
-$codex = Get-Command codex -ErrorAction SilentlyContinue
-if (-not $codex) {
+function Resolve-CodexCommand {
+    # 1. normal PATH lookup (Application = .exe/.cmd/.bat; ExternalScript = .ps1 shim)
+    $c = Get-Command codex -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($c) { return $c.Source }
+    # 2. known install locations (npm-global shim, its vendored native exe, winget, cargo, brew)
+    $candidates = @(
+        (Join-Path $env:APPDATA 'npm\codex.cmd'),
+        (Join-Path $env:APPDATA 'npm\codex.ps1'),
+        [Environment]::GetEnvironmentVariable('CODEX_CLI_PATH','Process'),
+        (Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-arm64\vendor\aarch64-pc-windows-msvc\bin\codex.exe'),
+        (Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\codex.exe'),
+        (Join-Path $env:USERPROFILE '.cargo\bin\codex.exe'),
+        '/opt/homebrew/bin/codex', '/usr/local/bin/codex'
+    ) | Where-Object { $_ -and (Test-Path $_ -ErrorAction SilentlyContinue) }
+    if ($candidates.Count) { return $candidates[0] }
+    return $null
+}
+
+$codexCmd = Resolve-CodexCommand
+if (-not $codexCmd) {
     Write-Host ''
-    Write-Host 'codex CLI not found on PATH.' -ForegroundColor Red
+    Write-Host 'codex CLI not found (checked PATH, npm-global, winget, cargo, brew).' -ForegroundColor Red
     Write-Host ''
-    Write-Host 'Install OpenAI Codex CLI (Rust, MIT):' -ForegroundColor Yellow
+    Write-Host 'Install OpenAI Codex CLI:' -ForegroundColor Yellow
+    Write-Host '  npm  install -g @openai/codex      # any OS (recommended)' -ForegroundColor Gray
     Write-Host '  winget install OpenAI.Codex        # Windows' -ForegroundColor Gray
     Write-Host '  brew install codex                  # macOS' -ForegroundColor Gray
-    Write-Host '  cargo install --git https://github.com/openai/codex codex-cli' -ForegroundColor Gray
     Write-Host ''
     Write-Host 'Then re-run kritical-codex.ps1.' -ForegroundColor Yellow
     exit 2
 }
+Write-Host "  codex CLI: $codexCmd" -ForegroundColor DarkGray
 
 # ------------------------------------------------------------
 # Per-invocation env (HR29: process scope only, never HKCU)
@@ -210,9 +263,9 @@ if ($Model) { $env:KRITICAL_CODEX_DEFAULT_MODEL = $Model }
 try {
     if ($Model -and ($CodexArgs -notcontains '--model') -and ($CodexArgs -notcontains '-m')) {
         # naive default-model injection — passes through if codex ignores it
-        & codex --model $Model @CodexArgs
+        & $codexCmd --model $Model @CodexArgs
     } else {
-        & codex @CodexArgs
+        & $codexCmd @CodexArgs
     }
     $exitCode = $LASTEXITCODE
 } finally {

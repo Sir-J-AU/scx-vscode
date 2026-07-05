@@ -152,11 +152,58 @@ function healTemps(list: ScxModel[]): ScxModel[] {
     return { id: m.id, detail: m.detail || 'live', temp, tempSrc: m.tempSrc || 'def' };
   });
 }
+// .5231 — a model is CHAT-capable unless it's an embedding / speech / moderation model.
+// Those live in /v1/models but 400 ("Unsupported model") on /v1/messages, so they must NEVER
+// appear in the chat picker — selecting one was the root cause of the "Unsupported model" error.
+const NON_CHAT_MODEL = /(embed|e5-mistral|whisper|opir|moderation|rerank|guard)/i;
+function isChatModel(m: ScxModel): boolean { return !NON_CHAT_MODEL.test(m.id); }
 function getModelCatalog(): ScxModel[] {
-  if (_liveModels && _liveModels.length) { return healTemps(_liveModels); }
-  const cached = readCacheOrBak(_modelsCachePath);
-  if (cached) { return healTemps(cached); }
-  return SCX_MODEL_CATALOG; // preseed — guaranteed non-empty
+  let list: ScxModel[];
+  if (_liveModels && _liveModels.length) { list = healTemps(_liveModels); }
+  else { const cached = readCacheOrBak(_modelsCachePath); list = cached ? healTemps(cached) : SCX_MODEL_CATALOG; }
+  const chat = list.filter(isChatModel);
+  return chat.length ? chat : SCX_MODEL_CATALOG.filter(isChatModel); // never blank the dropdown
+}
+
+// .5231 — map a requested model to the EXACT id the current endpoint advertises (case-insensitive).
+// Kills the direct-SCX ("MAGPiE") vs local-proxy ("magpie") case-mismatch class of 400s. Falls back to
+// the first chat model when the requested id isn't offered at all.
+function normalizeModelId(id: string): string {
+  const cat = getModelCatalog();
+  const exact = cat.find((m) => m.id === id);
+  if (exact) { return exact.id; }
+  const ci = cat.find((m) => m.id.toLowerCase() === (id || '').toLowerCase());
+  if (ci) { return ci.id; }
+  return cat.length ? cat[0].id : id; // last resort — a known-good chat model
+}
+
+// .5231 — publish the currently-selected model to a shared file the codex wrapper reads, so
+// "SCX Codex" launches on the SAME model the chat panel is using (operator .5231 request).
+const _currentModelPath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'current-model.json');
+let _lastPublishedModel = '';
+function publishCurrentModel(id: string): void {
+  if (!id || id === _lastPublishedModel) { return; }
+  _lastPublishedModel = id;
+  try {
+    fs.mkdirSync(path.dirname(_currentModelPath), { recursive: true });
+    fs.writeFileSync(_currentModelPath, JSON.stringify({ id, ts: new Date().toISOString() }));
+  } catch { /* best effort — never break a chat send */ }
+}
+
+// .5231 (operator request) — when the configured model isn't actually available, we auto-substitute a
+// VALID one, PERSIST it so it stops erroring, and TELL the operator it was corrected (with a one-click
+// way to pick a different one). No silent wrong-selection, no hard error thrown at the user.
+let _lastCorrectionNotified = '';
+function notifyModelCorrected(from: string, to: string): void {
+  try { vscode.workspace.getConfiguration('kritical.scxcode').update('defaultModel', to, vscode.ConfigurationTarget.Global); } catch { /* non-fatal */ }
+  publishCurrentModel(to);
+  const sig = `${from}->${to}`;
+  if (sig === _lastCorrectionNotified) { return; } // don't spam the same correction
+  _lastCorrectionNotified = sig;
+  vscode.window.showWarningMessage(
+    `Model "${from}" isn't available on this SCX endpoint — switched to "${to}". Pick another if you prefer.`,
+    'Pick model',
+  ).then((pick) => { if (pick === 'Pick model') { vscode.commands.executeCommand('kritical.scxcode.pickModel'); } });
 }
 function fetchLiveModels(): void {
   const { apiKey, baseUrl } = getConfig();
@@ -367,6 +414,8 @@ async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, k
   const { apiKey, baseUrl, systemPrompt, temperature } = getConfig();
   const useKey = keyOverride || apiKey;
   if (!useKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
+  model = normalizeModelId(model);       // .5231 — match the endpoint's exact id (direct vs proxy casing)
+  publishCurrentModel(model);            // .5231 — share the live model with the codex wrapper
   const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens, temperature };
   if (systemPrompt) body.system = systemPrompt;
 
@@ -437,7 +486,14 @@ async function scxPostWithFailover(messages: ScxMessage[], maxTokens = 800): Pro
   }
 
   // Provider = auto or scx-native: try SCX first.
-  const modelChain = [cfg.defaultModel, ...cfg.fallbackChain.filter((m) => m !== cfg.defaultModel)];
+  // .5231 — normalise every model in the chain to an id the endpoint actually offers (dropping
+  // unknowns + de-duping). If the operator's chosen default had to be corrected, tell them.
+  const requestedPrimary = cfg.defaultModel;
+  const rawChain = [cfg.defaultModel, ...cfg.fallbackChain.filter((m) => m !== cfg.defaultModel)];
+  const modelChain = rawChain.map(normalizeModelId).filter((m, i, a) => a.indexOf(m) === i);
+  if (modelChain.length && modelChain[0].toLowerCase() !== (requestedPrimary || '').toLowerCase()) {
+    notifyModelCorrected(requestedPrimary, modelChain[0]);
+  }
   const keys = cfg.apiKeys.length > 0 ? cfg.apiKeys : [cfg.apiKey];
   for (const model of modelChain) {
     for (let ki = 0; ki < keys.length; ki++) {
@@ -449,7 +505,10 @@ async function scxPostWithFailover(messages: ScxMessage[], maxTokens = 800): Pro
         return { res, modelUsed: model, keyIndex: ki + 1, attempts: tried };
       } catch (e) {
         lastErr = e;
-        if (e instanceof ScxHttpError && (e.isRateLimit || e.isServerError)) {
+        // .5231 — a 400 naming an unknown/unsupported model is RECOVERABLE: walk the fallback chain
+        // instead of dying, so one bad model selection can't brick the whole panel.
+        const isModelErr = e instanceof ScxHttpError && e.status === 400 && /model/i.test(e.body);
+        if (e instanceof ScxHttpError && (e.isRateLimit || e.isServerError || isModelErr)) {
           continue; // try next (model, key)
         }
         throw e; // non-transient error — surface immediately
@@ -584,6 +643,7 @@ async function cmdPickModel() {
   });
   if (!picked) return;
   await vscode.workspace.getConfiguration('kritical.scxcode').update('defaultModel', picked.label, vscode.ConfigurationTarget.Global);
+  publishCurrentModel(picked.label); // .5231 — keep SCX Codex in sync with the picked model
   vscode.window.showInformationMessage(`Kritical SCXCode default model → ${picked.label}`);
 }
 
@@ -1259,7 +1319,9 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
       codexConfigPath: codexConfigPath(),
     };
   }
-  panel.webview.html = setupGuiHtml();
+  let logoUri = '';
+  try { logoUri = 'data:image/png;base64,' + fs.readFileSync(path.join(context.extensionPath, 'media', 'kritical-symbol.png')).toString('base64'); } catch { /* fallback handled in html */ }
+  panel.webview.html = setupGuiHtml(logoUri);
   panel.webview.onDidReceiveMessage(async (m) => {
     if (m.type === 'load') { post(snapshot()); probeProxy().then((r) => post({ type: 'proxy', running: r })); }
     else if (m.type === 'saveCodex') {
@@ -1289,102 +1351,190 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
     else if (m.type === 'testProxy') { probeProxy().then((r) => post({ type: 'proxy', running: r })); }
   });
 }
-function setupGuiHtml(): string {
+function setupGuiHtml(logoUri: string): string {
+  const logoTag = logoUri
+    ? `<img class="logo" src="${logoUri}" alt="Kritical">`
+    : `<svg class="logo" viewBox="0 0 128 128"><rect width="128" height="128" rx="18" fill="#13365C"/><path d="M28 24 L28 104 L44 104 L44 72 L68 104 L88 104 L58 62 L86 24 L66 24 L44 54 L44 24 Z" fill="#fff"/></svg>`;
+  // .5231 — pretty pass. HTML5 in-app graphics rendered on the LOCAL GPU/CPU (2D canvas — no external
+  // assets, CSP-safe): an animated Southern Cross constellation over a slow starfield (SCX = Southern
+  // Cross AI). Glass panels, cyan-glow selectors. Codex "Model" is now a validated dropdown from the SAME
+  // model list, defaulting to "(follow chat panel selection)" so SCX Codex tracks the chat model.
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-  :root{--k-navy:#13365C;--k-cyan:#15AFD1;}
-  body{font-family:var(--vscode-font-family,system-ui);background:var(--vscode-editor-background,#1e1e1e);color:var(--vscode-editor-foreground,#e5e5e5);margin:0;font-size:13px;}
-  header{background:var(--k-navy);color:#fff;padding:10px 16px;border-bottom:2px solid var(--k-cyan);display:flex;align-items:center;gap:10px;}
-  header .b{font-weight:600;} header .b::before{content:'◆';color:var(--k-cyan);margin-right:6px;}
-  .status{margin-left:auto;font-size:11px;font-family:monospace;opacity:.85;}
-  .tabs{display:flex;gap:2px;background:var(--vscode-editorWidget-background,#252526);border-bottom:1px solid var(--vscode-panel-border,#3e3e42);}
-  .tab{padding:8px 16px;cursor:pointer;border:0;background:transparent;color:var(--vscode-editor-foreground,#ccc);font-size:12px;border-bottom:2px solid transparent;}
-  .tab.active{color:var(--k-cyan);border-bottom-color:var(--k-cyan);font-weight:600;}
-  .pane{display:none;padding:16px;max-width:820px;} .pane.active{display:block;}
-  h3{margin:0 0 4px;color:var(--k-cyan);font-size:13px;} .hint{opacity:.65;font-size:11px;margin:0 0 12px;}
-  label{display:block;margin:10px 0 3px;font-size:11px;opacity:.85;}
-  input,select,textarea{width:100%;background:var(--vscode-input-background,#1e1e1e);color:var(--vscode-input-foreground,#e5e5e5);border:1px solid var(--vscode-input-border,#3e3e42);border-radius:3px;padding:5px 7px;font-size:12px;font-family:inherit;box-sizing:border-box;}
-  select option{background:var(--vscode-dropdown-listBackground,#252526);color:var(--vscode-dropdown-foreground,#e5e5e5);}
-  .row{display:grid;grid-template-columns:150px 1fr 1.4fr 1.4fr 30px;gap:8px;align-items:center;margin:6px 0;}
-  .row input{margin:0;} .colhdr{font-size:10px;opacity:.6;}
-  button.save{background:var(--k-navy);color:#fff;border:0;border-radius:4px;padding:7px 16px;cursor:pointer;font-weight:500;margin-top:14px;}
-  button.save:hover{background:#1a4574;} button.add{background:transparent;border:1px dashed var(--k-cyan);color:var(--k-cyan);border-radius:4px;padding:5px 12px;cursor:pointer;font-size:12px;margin-top:8px;}
-  button.rm{background:transparent;border:1px solid var(--vscode-panel-border,#555);color:#d72638;border-radius:3px;cursor:pointer;}
-  .ok{color:#3fb950;font-size:11px;margin-left:10px;} .err{color:#d72638;font-size:11px;margin-left:10px;}
-  .path{font-family:monospace;font-size:10px;opacity:.6;word-break:break-all;}
-  .launch{background:transparent;border:1px solid var(--k-cyan);color:var(--k-cyan);border-radius:4px;padding:6px 12px;cursor:pointer;margin-top:10px;}
+  :root{--k-navy:#13365C;--k-navy2:#0d2440;--k-cyan:#15AFD1;--k-cyan-dim:#15afd155;--k-ok:#3fb950;--k-err:#d72638;
+    --bg:var(--vscode-editor-background,#1e1e1e);--fg:var(--vscode-editor-foreground,#e5e5e5);
+    --panel:var(--vscode-editorWidget-background,#252526);--bd:var(--vscode-panel-border,#3e3e42);
+    --in-bg:var(--vscode-input-background,#1a1a1a);}
+  *{box-sizing:border-box;}
+  body{font-family:var(--vscode-font-family,system-ui);background:var(--bg);color:var(--fg);margin:0;font-size:13px;}
+  .hero{position:relative;overflow:hidden;background:linear-gradient(135deg,var(--k-navy2),var(--k-navy) 60%,#0a1c33);border-bottom:1px solid var(--k-cyan);}
+  .hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block;}
+  .hero .inner{position:relative;z-index:2;padding:18px 20px;display:flex;align-items:center;gap:12px;}
+  .hero .logo{width:30px;height:30px;border-radius:7px;background:#fff;padding:3px;object-fit:contain;box-shadow:0 0 10px rgba(21,175,209,.4);}
+  .hero h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px;color:#fff;}
+  .hero .sub{font-size:11px;opacity:.7;color:#bfe9f5;margin-top:1px;}
+  .pill{margin-left:auto;z-index:2;display:flex;align-items:center;gap:7px;background:#00000040;border:1px solid var(--k-cyan-dim);border-radius:20px;padding:5px 12px;font:11px/1 var(--vscode-editor-font-family,monospace);color:#bfe9f5;}
+  .dot{width:8px;height:8px;border-radius:50%;background:#888;box-shadow:0 0 0 0 transparent;}
+  .dot.on{background:var(--k-ok);animation:pulse 1.8s infinite;} .dot.off{background:#8a5;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 #3fb95088;}70%{box-shadow:0 0 0 7px #3fb95000;}100%{box-shadow:0 0 0 0 #3fb95000;}}
+  .tabs{display:flex;gap:4px;padding:10px 16px 0;background:var(--bg);}
+  .tab{padding:8px 16px;cursor:pointer;border:1px solid transparent;border-bottom:none;background:transparent;color:var(--fg);opacity:.7;font-size:12px;border-radius:8px 8px 0 0;transition:.15s;}
+  .tab:hover{opacity:1;background:#ffffff08;}
+  .tab.active{opacity:1;color:var(--k-cyan);background:var(--panel);border-color:var(--bd);font-weight:600;box-shadow:inset 0 -2px 0 var(--k-cyan);}
+  .wrap{padding:16px;max-width:760px;}
+  .pane{display:none;} .pane.active{display:block;animation:fade .2s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+  .card{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:18px 18px 20px;box-shadow:0 2px 14px #0003;}
+  h3{margin:0 0 4px;color:var(--k-cyan);font-size:14px;display:flex;align-items:center;gap:7px;} h3::before{content:'';width:4px;height:15px;background:var(--k-cyan);border-radius:2px;}
+  .hint{opacity:.6;font-size:11px;margin:0 0 14px;line-height:1.5;}
+  label{display:block;margin:12px 0 4px;font-size:11px;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.4px;}
+  input,select,textarea{width:100%;background:var(--in-bg);color:var(--fg);border:1px solid var(--bd);border-radius:7px;padding:8px 10px;font-size:12px;font-family:inherit;transition:.15s;}
+  input:focus,select:focus{outline:none;border-color:var(--k-cyan);box-shadow:0 0 0 3px var(--k-cyan-dim);}
+  select option{background:var(--vscode-dropdown-listBackground,#252526);color:var(--fg);}
+  .note{font-size:10.5px;opacity:.6;margin-top:4px;} .note.warn{color:#e3b341;opacity:.95;}
+  .mcp-card{border:1px solid var(--bd);border-radius:10px;padding:12px;margin:10px 0;background:#ffffff05;position:relative;}
+  .mcp-card .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;}
+  .mcp-card .full{grid-column:1/3;}
+  .mcp-card .rm{position:absolute;top:8px;right:8px;background:transparent;border:1px solid var(--bd);color:var(--k-err);border-radius:6px;width:24px;height:24px;cursor:pointer;line-height:1;}
+  .mcp-card .rm:hover{background:#d7263822;border-color:var(--k-err);}
+  button.save{background:linear-gradient(135deg,var(--k-cyan),#0f8bad);color:#04222c;border:0;border-radius:8px;padding:9px 18px;cursor:pointer;font-weight:700;margin-top:16px;box-shadow:0 2px 10px #15afd140;transition:.15s;}
+  button.save:hover{transform:translateY(-1px);box-shadow:0 4px 16px #15afd160;}
+  button.add{background:transparent;border:1px dashed var(--k-cyan);color:var(--k-cyan);border-radius:8px;padding:7px 14px;cursor:pointer;font-size:12px;margin-top:6px;}
+  button.add:hover{background:var(--k-cyan-dim);}
+  .launch{display:inline-flex;align-items:center;gap:7px;background:transparent;border:1px solid var(--k-cyan);color:var(--k-cyan);border-radius:8px;padding:8px 16px;cursor:pointer;margin-top:12px;font-weight:600;}
+  .launch:hover{background:var(--k-cyan-dim);}
+  .ok{color:var(--k-ok);font-size:11px;margin-left:12px;} .err{color:var(--k-err);font-size:11px;margin-left:12px;}
+  .path{font-family:var(--vscode-editor-font-family,monospace);font-size:10px;opacity:.55;word-break:break-all;}
+  .foot{padding:10px 18px;font-size:10px;opacity:.5;text-align:center;}
   </style></head><body>
-  <header><span class="b">Kritical SCX — Setup</span><span class="status" id="status">…</span></header>
+  <div class="hero">
+    <canvas id="sky"></canvas>
+    <div class="inner">
+      ${logoTag}
+      <div><h1>Kritical SCX — Setup</h1><div class="sub">Sovereign Australian AI · Southern Cross AI</div></div>
+      <div class="pill"><span class="dot" id="pdot"></span><span id="status">checking proxy…</span></div>
+    </div>
+  </div>
   <div class="tabs">
-    <button class="tab active" data-t="codex">SCX Codex options</button>
-    <button class="tab" data-t="mcp">MCP servers</button>
-    <button class="tab" data-t="scxcode">SCXCode</button>
+    <button class="tab active" data-t="codex">✦ SCX Codex</button>
+    <button class="tab" data-t="mcp">🔌 MCP servers</button>
+    <button class="tab" data-t="scxcode">⚙ SCXCode</button>
   </div>
-
-  <div class="pane active" id="pane-codex">
-    <h3>SCX Codex — options (shared with the <code>codex</code> CLI)</h3>
-    <p class="hint">These write <span class="path" id="cfgpath"></span> — the same file <code>codex</code> reads. Your plugins &amp; marketplaces are preserved and a timestamped backup is made on every save.</p>
-    <label>Model</label><input id="cx-model" placeholder="e.g. gpt-5.5 or scx-coder">
-    <label>Sandbox mode</label><select id="cx-sandbox"><option>read-only</option><option>workspace-write</option><option>danger-full-access</option></select>
-    <label>Reasoning effort</label><select id="cx-reasoning"><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select>
-    <label>Approval policy</label><select id="cx-approval"><option>untrusted</option><option>on-failure</option><option>on-request</option><option>never</option></select>
-    <div><button class="save" id="save-codex">Save Codex options</button><span id="msg-codex"></span></div>
-    <button class="launch" id="launch">✦ Launch SCX Codex now</button>
+  <div class="wrap">
+    <div class="pane active" id="pane-codex"><div class="card">
+      <h3>SCX Codex — options</h3>
+      <p class="hint">Written to <span class="path" id="cfgpath"></span> — the same file the <code>codex</code> CLI reads. Plugins &amp; marketplaces are preserved; a timestamped backup is made on every save.</p>
+      <label>Model</label>
+      <select id="cx-model"></select>
+      <div class="note" id="cx-model-note">Defaults to <b>(follow chat panel)</b> — SCX Codex uses whatever model your chat panel is on.</div>
+      <label>Sandbox mode</label><select id="cx-sandbox"><option>read-only</option><option>workspace-write</option><option>danger-full-access</option></select>
+      <label>Reasoning effort</label><select id="cx-reasoning"><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select>
+      <label>Approval policy</label><select id="cx-approval"><option>untrusted</option><option>on-failure</option><option>on-request</option><option>never</option></select>
+      <div><button class="save" id="save-codex">Save Codex options</button><span id="msg-codex"></span></div>
+      <div><button class="launch" id="launch">✦ Launch SCX Codex now</button></div>
+    </div></div>
+    <div class="pane" id="pane-mcp"><div class="card">
+      <h3>MCP servers</h3>
+      <p class="hint">Shared with <code>codex</code>. Each card is an <code>[mcp_servers.&lt;name&gt;]</code> entry — Args are space-separated; Env is JSON like <code>{"KEY":"val"}</code>.</p>
+      <div id="mcp-rows"></div>
+      <button class="add" id="add-mcp">+ Add MCP server</button>
+      <div><button class="save" id="save-mcp">Save MCP servers</button><span id="msg-mcp"></span></div>
+    </div></div>
+    <div class="pane" id="pane-scxcode"><div class="card">
+      <h3>SCXCode extension</h3>
+      <p class="hint">The VS Code extension's own settings (stored in VS Code, not config.toml).</p>
+      <label>SCX API base URL</label><input id="sx-base" placeholder="https://api.scx.ai">
+      <label>Default model</label><select id="sx-model"></select>
+      <div class="note" id="sx-model-note"></div>
+      <label>API key</label><input id="sx-key" disabled>
+      <div><button class="save" id="save-scxcode">Save SCXCode settings</button><span id="msg-scxcode"></span></div>
+    </div></div>
   </div>
-
-  <div class="pane" id="pane-mcp">
-    <h3>MCP servers (shared with <code>codex</code>)</h3>
-    <p class="hint">Each row is an <code>[mcp_servers.&lt;name&gt;]</code> entry. Args are space-separated; Env is JSON like <code>{"KEY":"val"}</code>. Saved to config.toml for both SCXCode and Codex.</p>
-    <div class="row colhdr"><span>name</span><span>command</span><span>args</span><span>env (JSON)</span><span></span></div>
-    <div id="mcp-rows"></div>
-    <button class="add" id="add-mcp">+ Add MCP server</button>
-    <div><button class="save" id="save-mcp">Save MCP servers</button><span id="msg-mcp"></span></div>
-  </div>
-
-  <div class="pane" id="pane-scxcode">
-    <h3>SCXCode extension</h3>
-    <p class="hint">The VS Code extension's own settings (stored in VS Code, not config.toml).</p>
-    <label>SCX API base URL</label><input id="sx-base" placeholder="https://api.scx.ai">
-    <label>Default model</label><select id="sx-model"></select>
-    <label>API key</label><input id="sx-key" disabled>
-    <div><button class="save" id="save-scxcode">Save SCXCode settings</button><span id="msg-scxcode"></span></div>
-  </div>
+  <div class="foot">Kritical Pty Ltd · sales@kritical.net · 1300 274 655</div>
 
   <script>
   var vscode = acquireVsCodeApi();
   var MODELS = [];
+  var FOLLOW = '\\u2063(follow chat panel selection)';
   function q(id){return document.getElementById(id);}
-  document.querySelectorAll('.tab').forEach(function(t){ t.onclick=function(){
-    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active');});
-    document.querySelectorAll('.pane').forEach(function(x){x.classList.remove('active');});
-    t.classList.add('active'); q('pane-'+t.dataset.t).classList.add('active');
+  // --- Southern Cross starfield (local GPU/CPU 2D canvas) — decorative, must NEVER break controls ---
+  try { (function(){
+    var c=q('sky'),x=c.getContext('2d'),W,H,stars=[],t=0;
+    var cross=[[.62,.30,2.6],[.72,.68,2.2],[.80,.44,1.8],[.55,.56,1.5],[.68,.50,1.1]]; // Crux (5 stars, rel coords)
+    function size(){W=c.width=c.offsetWidth*devicePixelRatio;H=c.height=c.offsetHeight*devicePixelRatio;
+      stars=[];for(var i=0;i<70;i++){stars.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.1*devicePixelRatio+.2,p:Math.random()*6.28,s:Math.random()*.5+.2});}}
+    function draw(){t+=.016;x.clearRect(0,0,W,H);
+      for(var i=0;i<stars.length;i++){var st=stars[i];var a=.25+.35*(0.5+0.5*Math.sin(t*st.s+st.p));
+        x.beginPath();x.arc(st.x,st.y,st.r,0,6.29);x.fillStyle='rgba(191,233,245,'+a+')';x.fill();}
+      // constellation lines + stars
+      var px=cross.map(function(p){return [p[0]*W,p[1]*H];});
+      x.strokeStyle='rgba(21,175,209,.28)';x.lineWidth=1*devicePixelRatio;
+      x.beginPath();x.moveTo(px[0][0],px[0][1]);x.lineTo(px[1][0],px[1][1]);x.moveTo(px[2][0],px[2][1]);x.lineTo(px[3][0],px[3][1]);x.stroke();
+      for(var j=0;j<cross.length;j++){var g=.6+.4*Math.sin(t*1.2+j);var r=cross[j][2]*devicePixelRatio;
+        var grd=x.createRadialGradient(px[j][0],px[j][1],0,px[j][0],px[j][1],r*4);
+        grd.addColorStop(0,'rgba(21,175,209,'+g+')');grd.addColorStop(1,'rgba(21,175,209,0)');
+        x.fillStyle=grd;x.beginPath();x.arc(px[j][0],px[j][1],r*4,0,6.29);x.fill();
+        x.fillStyle='rgba(230,250,255,'+g+')';x.beginPath();x.arc(px[j][0],px[j][1],r,0,6.29);x.fill();}
+      requestAnimationFrame(draw);}
+    size();draw();window.addEventListener('resize',size);
+  })(); } catch(e){ /* canvas is decorative — controls below must still wire up */ }
+  // --- tabs ---
+  document.querySelectorAll('.tab').forEach(function(tb){ tb.onclick=function(){
+    document.querySelectorAll('.tab').forEach(function(z){z.classList.remove('active');});
+    document.querySelectorAll('.pane').forEach(function(z){z.classList.remove('active');});
+    tb.classList.add('active'); q('pane-'+tb.dataset.t).classList.add('active');
   };});
-  function mcpRow(s){ s=s||{name:'',command:'',args:'',env:''};
-    var d=document.createElement('div'); d.className='row';
-    d.innerHTML='<input class="m-name" placeholder="name"><input class="m-cmd" placeholder="command"><input class="m-args" placeholder="args"><input class="m-env" placeholder="{}"><button class="rm">✕</button>';
+  // --- helpers: only ever offer models that exist; auto-correct silently in the UI ---
+  function fillModelSelect(sel, includeFollow){ sel.innerHTML='';
+    if(includeFollow){ var f=document.createElement('option'); f.value=''; f.textContent=FOLLOW; sel.appendChild(f); }
+    MODELS.forEach(function(id){ var o=document.createElement('option'); o.value=id; o.textContent=id; sel.appendChild(o); });
+  }
+  function selectValid(sel, want, noteEl, kind){
+    var ids=Array.prototype.map.call(sel.options,function(o){return o.value;});
+    if(want && ids.indexOf(want)>=0){ sel.value=want; if(noteEl){noteEl.className='note';noteEl.textContent='';} return want; }
+    if(!want){ sel.value=''; return ''; }
+    // requested value isn't available -> pick a valid one + tell the user
+    var fallback = ids.filter(function(v){return v;})[0] || '';
+    sel.value = fallback;
+    if(noteEl){ noteEl.className='note warn'; noteEl.textContent='"'+want+'" isn\\'t available on this endpoint — set to "'+fallback+'". Pick another if you like.'; }
+    return fallback;
+  }
+  function mcpCard(s){ s=s||{name:'',command:'',args:'',env:''};
+    var d=document.createElement('div'); d.className='mcp-card';
+    d.innerHTML='<button class="rm" title="remove">\\u2715</button>'+
+      '<div class="grid">'+
+      '<div><label>name</label><input class="m-name" placeholder="e.g. shopify"></div>'+
+      '<div><label>command</label><input class="m-cmd" placeholder="npx / path.exe"></div>'+
+      '<div class="full"><label>args (space-separated)</label><input class="m-args" placeholder="-y @scope/pkg@latest"></div>'+
+      '<div class="full"><label>env (JSON)</label><input class="m-env" placeholder="{\\"KEY\\":\\"value\\"}"></div>'+
+      '</div>';
     d.querySelector('.m-name').value=s.name; d.querySelector('.m-cmd').value=s.command; d.querySelector('.m-args').value=s.args; d.querySelector('.m-env').value=s.env;
     d.querySelector('.rm').onclick=function(){ d.remove(); };
     return d;
   }
-  q('add-mcp').onclick=function(){ q('mcp-rows').appendChild(mcpRow()); };
+  q('add-mcp').onclick=function(){ q('mcp-rows').appendChild(mcpCard()); };
   q('save-codex').onclick=function(){ vscode.postMessage({type:'saveCodex',model:q('cx-model').value,sandbox_mode:q('cx-sandbox').value,reasoning:q('cx-reasoning').value,approval:q('cx-approval').value}); };
   q('save-mcp').onclick=function(){
-    var servers=[]; q('mcp-rows').querySelectorAll('.row').forEach(function(r){ servers.push({name:r.querySelector('.m-name').value.trim(),command:r.querySelector('.m-cmd').value.trim(),args:r.querySelector('.m-args').value.trim(),env:r.querySelector('.m-env').value.trim()}); });
+    var servers=[]; q('mcp-rows').querySelectorAll('.mcp-card').forEach(function(r){ servers.push({name:r.querySelector('.m-name').value.trim(),command:r.querySelector('.m-cmd').value.trim(),args:r.querySelector('.m-args').value.trim(),env:r.querySelector('.m-env').value.trim()}); });
     vscode.postMessage({type:'saveMcp',servers:servers});
   };
   q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value}); };
   q('launch').onclick=function(){ vscode.postMessage({type:'launchCodex'}); };
   window.addEventListener('message',function(e){ var m=e.data;
     if(m.type==='data'){
-      MODELS=m.models||[]; q('cfgpath').textContent=m.codexConfigPath;
-      q('cx-model').value=m.codex.model; q('cx-sandbox').value=m.codex.sandbox_mode; q('cx-reasoning').value=m.codex.model_reasoning_effort; q('cx-approval').value=m.codex.approval_policy;
-      q('mcp-rows').innerHTML=''; (m.mcp||[]).forEach(function(s){ q('mcp-rows').appendChild(mcpRow(s)); });
-      if(!(m.mcp||[]).length){ q('mcp-rows').appendChild(mcpRow()); }
+      MODELS=(m.models||[]).map(function(x){return (x&&x.id)?x.id:x;}); q('cfgpath').textContent=m.codexConfigPath;
+      fillModelSelect(q('cx-model'),true);
+      selectValid(q('cx-model'), m.codex.model||'', q('cx-model-note'), 'codex');
+      if(!m.codex.model){ q('cx-model-note').className='note'; q('cx-model-note').innerHTML='Defaults to <b>(follow chat panel)</b> — SCX Codex uses whatever model your chat panel is on.'; }
+      q('cx-sandbox').value=m.codex.sandbox_mode; q('cx-reasoning').value=m.codex.model_reasoning_effort; q('cx-approval').value=m.codex.approval_policy;
+      q('mcp-rows').innerHTML=''; (m.mcp||[]).forEach(function(s){ q('mcp-rows').appendChild(mcpCard(s)); });
+      if(!(m.mcp||[]).length){ q('mcp-rows').appendChild(mcpCard()); }
       q('sx-base').value=m.scxcode.baseUrl; q('sx-key').value=m.scxcode.apiKeySet?('set · '+m.scxcode.keyCount+' key(s) in HKCU'):'NOT SET — set SCX_API_KEY';
-      var sel=q('sx-model'); sel.innerHTML=''; MODELS.forEach(function(id){ var o=document.createElement('option'); o.value=id; o.textContent=id; sel.appendChild(o); }); sel.value=m.scxcode.defaultModel;
+      fillModelSelect(q('sx-model'),false);
+      selectValid(q('sx-model'), m.scxcode.defaultModel, q('sx-model-note'), 'scx');
       if(m.tab){ var tb=document.querySelector('.tab[data-t="'+m.tab+'"]'); if(tb) tb.click(); }
     } else if(m.type==='saved'){
       var el=q('msg-'+m.section); if(el){ if(m.ok===false){ el.className='err'; el.textContent='✗ '+(m.error||'failed'); } else { el.className='ok'; el.textContent='✓ saved'+(m.backup?(' · backup '+m.backup.split(/[\\\\/]/).pop()):''); } setTimeout(function(){el.textContent='';},6000); }
-    } else if(m.type==='proxy'){ q('status').textContent='LiteLLM proxy :4180 '+(m.running?'● running':'○ off'); }
+    } else if(m.type==='proxy'){ var on=m.running; q('status').textContent='LiteLLM :4180 '+(on?'running':'off'); q('pdot').className='dot '+(on?'on':'off'); }
   });
   vscode.postMessage({type:'load'});
   </script></body></html>`;
