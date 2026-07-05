@@ -2,7 +2,7 @@
   "name": "SCXCode",
   "displayName": "Kritical SCXCode",
   "description": "SCX in VS Code the Kritical way — chat + inline complete + model picker + auto-failover for MiniMax-M2.7 / MAGPiE / gpt-oss-120b / DeepSeek-V3.1 / coder / gemma-4 / Qwen3 / Llama-4-Maverick.",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "publisher": "kritical",
   "author": {
     "name": "Joshua Finley",
@@ -119,6 +119,12 @@
         "command": "kritical.scxcode.checkUpdate",
         "title": "Kritical: Check for SCXCode Update (sideloaded VSIX)",
         "category": "Kritical SCXCode"
+      },
+      {
+        "command": "kritical.scxcode.setupGui",
+        "title": "Kritical: SCX Setup (Codex options + MCP servers + SCXCode — shared config)",
+        "category": "Kritical SCXCode",
+        "icon": "$(settings-gear)"
       }
     ],
     "menus": {
@@ -142,6 +148,11 @@
           "command": "kritical.scxcode.scxCodex",
           "when": "view == kritical.scxcode.chat",
           "group": "navigation@4"
+        },
+        {
+          "command": "kritical.scxcode.setupGui",
+          "when": "view == kritical.scxcode.chat",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
@@ -186,6 +197,10 @@
         },
         {
           "command": "kritical.scxcode.checkUpdate",
+          "when": "true"
+        },
+        {
+          "command": "kritical.scxcode.setupGui",
           "when": "true"
         }
       ]
@@ -391,8 +406,8 @@
     "test": "node ./out/test/runTests.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.5.0"
   },
@@ -417,5 +432,8 @@
       "supported": "limited",
       "description": "Extension reads SCX_API_KEY from HKCU env; safe. It does NOT execute untrusted workspace code. Chat + inline complete require trust because they can act on file contents."
     }
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5"
   }
 }

@@ -15,6 +15,7 @@ import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
+import * as tomlLib from '@iarna/toml';
 
 interface ScxMessage { role: 'user' | 'assistant' | 'system'; content: string; }
 interface ScxCompletionRequest { model: string; messages: ScxMessage[]; max_tokens?: number; system?: string; temperature?: number; }
@@ -703,7 +704,7 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       attached += `\n\n## Workspace files (${rel.length}):\n${rel.join('\n')}\n`;
       panel.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: attached.length });
     } else if (msg.type === 'listMcp') {
-      panel.webview.postMessage({ type: 'notice', text: mcpSummary() });
+      vscode.commands.executeCommand('kritical.scxcode.setupGui');   // .5229 — open the real MCP/Codex setup GUI
     } else if (msg.type === 'scxCodex') {
       vscode.commands.executeCommand('kritical.scxcode.scxCodex');
     } else if (msg.type === 'config') {
@@ -998,7 +999,7 @@ window.addEventListener('message', (e) => {
 // the real defaultModel (and the '…' placeholder resolves).
 vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.15</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.16</div>
 </body></html>`;
 }
 
@@ -1099,7 +1100,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
         this._attached += `\n\n## Workspace files (${rel.length}):\n${rel.join('\n')}\n`;
         view.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: this._attached.length });
       } else if (msg.type === 'listMcp') {
-        view.webview.postMessage({ type: 'notice', text: mcpSummary() });
+        vscode.commands.executeCommand('kritical.scxcode.setupGui');   // .5229 — open the real MCP/Codex setup GUI
       } else if (msg.type === 'scxCodex') {
         vscode.commands.executeCommand('kritical.scxcode.scxCodex');
       } else if (msg.type === 'config') {
@@ -1187,6 +1188,185 @@ function cmdCheckUpdate(context: vscode.ExtensionContext) {
   });
 }
 
+// ==========================================================================
+// .5229 — SHARED SETUP GUI. A real end-to-end config screen for MCP servers + SCX Codex options that
+// writes the SAME ~/.codex/config.toml the `codex` CLI reads, so configuring here configures Codex too.
+// Every write is SURGICAL (merge into the parsed config, keep the operator's plugins/marketplaces/notify)
+// and BACKED UP (config.toml.bak-<ts>) before the file is replaced — never clobber a working config.
+// ==========================================================================
+function codexConfigPath(): string { return path.join(process.env.USERPROFILE || process.env.HOME || '', '.codex', 'config.toml'); }
+function readCodexConfig(): any {
+  try { const p = codexConfigPath(); if (fs.existsSync(p)) { return tomlLib.parse(fs.readFileSync(p, 'utf8')); } } catch { /* return empty on parse error */ }
+  return {};
+}
+function writeCodexConfigSafe(obj: any): { ok: boolean; error?: string; backup?: string } {
+  try {
+    const p = codexConfigPath();
+    const out = tomlLib.stringify(obj as any);
+    tomlLib.parse(out); // validate the round-trip before committing
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    let backup = '';
+    if (fs.existsSync(p)) { backup = p + '.bak-' + Date.now(); fs.copyFileSync(p, backup); }
+    const tmp = p + '.tmp'; fs.writeFileSync(tmp, out); fs.renameSync(tmp, p);   // atomic
+    return { ok: true, backup };
+  } catch (e: any) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
+}
+function probeProxy(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = require('http').request({ host: '127.0.0.1', port: 4180, path: '/health/liveliness', method: 'GET', timeout: 1500 }, (r: any) => { r.resume(); resolve(r.statusCode === 200); });
+    req.on('error', () => resolve(false)); req.on('timeout', () => { req.destroy(); resolve(false); }); req.end();
+  });
+}
+function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
+  const panel = vscode.window.createWebviewPanel('kriticalScxSetup', 'Kritical SCX — Setup', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
+  const post = (m: any) => panel.webview.postMessage(m);
+  function snapshot() {
+    const cfg = getConfig();
+    const codex = readCodexConfig();
+    const mcp = codex.mcp_servers || {};
+    return {
+      type: 'data', tab: tab || 'codex',
+      models: getModelCatalog().map((m) => m.id),
+      codex: {
+        model: codex.model || '', sandbox_mode: codex.sandbox_mode || 'workspace-write',
+        model_reasoning_effort: codex.model_reasoning_effort || 'medium', approval_policy: codex.approval_policy || 'on-request',
+      },
+      mcp: Object.keys(mcp).map((name) => ({ name, command: mcp[name].command || '', args: Array.isArray(mcp[name].args) ? mcp[name].args.join(' ') : '', env: mcp[name].env ? JSON.stringify(mcp[name].env) : '' })),
+      scxcode: { baseUrl: cfg.baseUrl, defaultModel: cfg.defaultModel, apiKeySet: !!cfg.apiKey, keyCount: cfg.apiKeys.length, temperature: cfg.temperature },
+      codexConfigPath: codexConfigPath(),
+    };
+  }
+  panel.webview.html = setupGuiHtml();
+  panel.webview.onDidReceiveMessage(async (m) => {
+    if (m.type === 'load') { post(snapshot()); probeProxy().then((r) => post({ type: 'proxy', running: r })); }
+    else if (m.type === 'saveCodex') {
+      const codex = readCodexConfig();
+      codex.model = m.model || undefined; codex.sandbox_mode = m.sandbox_mode; codex.model_reasoning_effort = m.reasoning; codex.approval_policy = m.approval;
+      const r = writeCodexConfigSafe(codex); post({ type: 'saved', section: 'codex', ...r });
+    } else if (m.type === 'saveMcp') {
+      const codex = readCodexConfig();
+      const servers: any = {};
+      for (const s of (m.servers || [])) {
+        if (!s.name) { continue; }
+        const entry: any = { command: s.command || '' };
+        if (s.args) { entry.args = String(s.args).split(/\s+/).filter(Boolean); }
+        if (s.env) { try { entry.env = JSON.parse(s.env); } catch { /* skip bad env json */ } }
+        servers[s.name] = entry;
+      }
+      codex.mcp_servers = servers;
+      const r = writeCodexConfigSafe(codex); post({ type: 'saved', section: 'mcp', ...r });
+    } else if (m.type === 'saveScxcode') {
+      try {
+        const c = vscode.workspace.getConfiguration('kritical.scxcode');
+        await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
+        await c.update('defaultModel', m.defaultModel, vscode.ConfigurationTarget.Global);
+        post({ type: 'saved', section: 'scxcode', ok: true });
+      } catch (e: any) { post({ type: 'saved', section: 'scxcode', ok: false, error: e.message }); }
+    } else if (m.type === 'launchCodex') { vscode.commands.executeCommand('kritical.scxcode.scxCodex'); }
+    else if (m.type === 'testProxy') { probeProxy().then((r) => post({ type: 'proxy', running: r })); }
+  });
+}
+function setupGuiHtml(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  :root{--k-navy:#13365C;--k-cyan:#15AFD1;}
+  body{font-family:var(--vscode-font-family,system-ui);background:var(--vscode-editor-background,#1e1e1e);color:var(--vscode-editor-foreground,#e5e5e5);margin:0;font-size:13px;}
+  header{background:var(--k-navy);color:#fff;padding:10px 16px;border-bottom:2px solid var(--k-cyan);display:flex;align-items:center;gap:10px;}
+  header .b{font-weight:600;} header .b::before{content:'◆';color:var(--k-cyan);margin-right:6px;}
+  .status{margin-left:auto;font-size:11px;font-family:monospace;opacity:.85;}
+  .tabs{display:flex;gap:2px;background:var(--vscode-editorWidget-background,#252526);border-bottom:1px solid var(--vscode-panel-border,#3e3e42);}
+  .tab{padding:8px 16px;cursor:pointer;border:0;background:transparent;color:var(--vscode-editor-foreground,#ccc);font-size:12px;border-bottom:2px solid transparent;}
+  .tab.active{color:var(--k-cyan);border-bottom-color:var(--k-cyan);font-weight:600;}
+  .pane{display:none;padding:16px;max-width:820px;} .pane.active{display:block;}
+  h3{margin:0 0 4px;color:var(--k-cyan);font-size:13px;} .hint{opacity:.65;font-size:11px;margin:0 0 12px;}
+  label{display:block;margin:10px 0 3px;font-size:11px;opacity:.85;}
+  input,select,textarea{width:100%;background:var(--vscode-input-background,#1e1e1e);color:var(--vscode-input-foreground,#e5e5e5);border:1px solid var(--vscode-input-border,#3e3e42);border-radius:3px;padding:5px 7px;font-size:12px;font-family:inherit;box-sizing:border-box;}
+  select option{background:var(--vscode-dropdown-listBackground,#252526);color:var(--vscode-dropdown-foreground,#e5e5e5);}
+  .row{display:grid;grid-template-columns:150px 1fr 1.4fr 1.4fr 30px;gap:8px;align-items:center;margin:6px 0;}
+  .row input{margin:0;} .colhdr{font-size:10px;opacity:.6;}
+  button.save{background:var(--k-navy);color:#fff;border:0;border-radius:4px;padding:7px 16px;cursor:pointer;font-weight:500;margin-top:14px;}
+  button.save:hover{background:#1a4574;} button.add{background:transparent;border:1px dashed var(--k-cyan);color:var(--k-cyan);border-radius:4px;padding:5px 12px;cursor:pointer;font-size:12px;margin-top:8px;}
+  button.rm{background:transparent;border:1px solid var(--vscode-panel-border,#555);color:#d72638;border-radius:3px;cursor:pointer;}
+  .ok{color:#3fb950;font-size:11px;margin-left:10px;} .err{color:#d72638;font-size:11px;margin-left:10px;}
+  .path{font-family:monospace;font-size:10px;opacity:.6;word-break:break-all;}
+  .launch{background:transparent;border:1px solid var(--k-cyan);color:var(--k-cyan);border-radius:4px;padding:6px 12px;cursor:pointer;margin-top:10px;}
+  </style></head><body>
+  <header><span class="b">Kritical SCX — Setup</span><span class="status" id="status">…</span></header>
+  <div class="tabs">
+    <button class="tab active" data-t="codex">SCX Codex options</button>
+    <button class="tab" data-t="mcp">MCP servers</button>
+    <button class="tab" data-t="scxcode">SCXCode</button>
+  </div>
+
+  <div class="pane active" id="pane-codex">
+    <h3>SCX Codex — options (shared with the <code>codex</code> CLI)</h3>
+    <p class="hint">These write <span class="path" id="cfgpath"></span> — the same file <code>codex</code> reads. Your plugins &amp; marketplaces are preserved and a timestamped backup is made on every save.</p>
+    <label>Model</label><input id="cx-model" placeholder="e.g. gpt-5.5 or scx-coder">
+    <label>Sandbox mode</label><select id="cx-sandbox"><option>read-only</option><option>workspace-write</option><option>danger-full-access</option></select>
+    <label>Reasoning effort</label><select id="cx-reasoning"><option>low</option><option>medium</option><option>high</option><option>xhigh</option></select>
+    <label>Approval policy</label><select id="cx-approval"><option>untrusted</option><option>on-failure</option><option>on-request</option><option>never</option></select>
+    <div><button class="save" id="save-codex">Save Codex options</button><span id="msg-codex"></span></div>
+    <button class="launch" id="launch">✦ Launch SCX Codex now</button>
+  </div>
+
+  <div class="pane" id="pane-mcp">
+    <h3>MCP servers (shared with <code>codex</code>)</h3>
+    <p class="hint">Each row is an <code>[mcp_servers.&lt;name&gt;]</code> entry. Args are space-separated; Env is JSON like <code>{"KEY":"val"}</code>. Saved to config.toml for both SCXCode and Codex.</p>
+    <div class="row colhdr"><span>name</span><span>command</span><span>args</span><span>env (JSON)</span><span></span></div>
+    <div id="mcp-rows"></div>
+    <button class="add" id="add-mcp">+ Add MCP server</button>
+    <div><button class="save" id="save-mcp">Save MCP servers</button><span id="msg-mcp"></span></div>
+  </div>
+
+  <div class="pane" id="pane-scxcode">
+    <h3>SCXCode extension</h3>
+    <p class="hint">The VS Code extension's own settings (stored in VS Code, not config.toml).</p>
+    <label>SCX API base URL</label><input id="sx-base" placeholder="https://api.scx.ai">
+    <label>Default model</label><select id="sx-model"></select>
+    <label>API key</label><input id="sx-key" disabled>
+    <div><button class="save" id="save-scxcode">Save SCXCode settings</button><span id="msg-scxcode"></span></div>
+  </div>
+
+  <script>
+  var vscode = acquireVsCodeApi();
+  var MODELS = [];
+  function q(id){return document.getElementById(id);}
+  document.querySelectorAll('.tab').forEach(function(t){ t.onclick=function(){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active');});
+    document.querySelectorAll('.pane').forEach(function(x){x.classList.remove('active');});
+    t.classList.add('active'); q('pane-'+t.dataset.t).classList.add('active');
+  };});
+  function mcpRow(s){ s=s||{name:'',command:'',args:'',env:''};
+    var d=document.createElement('div'); d.className='row';
+    d.innerHTML='<input class="m-name" placeholder="name"><input class="m-cmd" placeholder="command"><input class="m-args" placeholder="args"><input class="m-env" placeholder="{}"><button class="rm">✕</button>';
+    d.querySelector('.m-name').value=s.name; d.querySelector('.m-cmd').value=s.command; d.querySelector('.m-args').value=s.args; d.querySelector('.m-env').value=s.env;
+    d.querySelector('.rm').onclick=function(){ d.remove(); };
+    return d;
+  }
+  q('add-mcp').onclick=function(){ q('mcp-rows').appendChild(mcpRow()); };
+  q('save-codex').onclick=function(){ vscode.postMessage({type:'saveCodex',model:q('cx-model').value,sandbox_mode:q('cx-sandbox').value,reasoning:q('cx-reasoning').value,approval:q('cx-approval').value}); };
+  q('save-mcp').onclick=function(){
+    var servers=[]; q('mcp-rows').querySelectorAll('.row').forEach(function(r){ servers.push({name:r.querySelector('.m-name').value.trim(),command:r.querySelector('.m-cmd').value.trim(),args:r.querySelector('.m-args').value.trim(),env:r.querySelector('.m-env').value.trim()}); });
+    vscode.postMessage({type:'saveMcp',servers:servers});
+  };
+  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value}); };
+  q('launch').onclick=function(){ vscode.postMessage({type:'launchCodex'}); };
+  window.addEventListener('message',function(e){ var m=e.data;
+    if(m.type==='data'){
+      MODELS=m.models||[]; q('cfgpath').textContent=m.codexConfigPath;
+      q('cx-model').value=m.codex.model; q('cx-sandbox').value=m.codex.sandbox_mode; q('cx-reasoning').value=m.codex.model_reasoning_effort; q('cx-approval').value=m.codex.approval_policy;
+      q('mcp-rows').innerHTML=''; (m.mcp||[]).forEach(function(s){ q('mcp-rows').appendChild(mcpRow(s)); });
+      if(!(m.mcp||[]).length){ q('mcp-rows').appendChild(mcpRow()); }
+      q('sx-base').value=m.scxcode.baseUrl; q('sx-key').value=m.scxcode.apiKeySet?('set · '+m.scxcode.keyCount+' key(s) in HKCU'):'NOT SET — set SCX_API_KEY';
+      var sel=q('sx-model'); sel.innerHTML=''; MODELS.forEach(function(id){ var o=document.createElement('option'); o.value=id; o.textContent=id; sel.appendChild(o); }); sel.value=m.scxcode.defaultModel;
+      if(m.tab){ var tb=document.querySelector('.tab[data-t="'+m.tab+'"]'); if(tb) tb.click(); }
+    } else if(m.type==='saved'){
+      var el=q('msg-'+m.section); if(el){ if(m.ok===false){ el.className='err'; el.textContent='✗ '+(m.error||'failed'); } else { el.className='ok'; el.textContent='✓ saved'+(m.backup?(' · backup '+m.backup.split(/[\\\\/]/).pop()):''); } setTimeout(function(){el.textContent='';},6000); }
+    } else if(m.type==='proxy'){ q('status').textContent='LiteLLM proxy :4180 '+(m.running?'● running':'○ off'); }
+  });
+  vscode.postMessage({type:'load'});
+  </script></body></html>`;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   fetchLiveModels(); // .5227 — refresh the model cache from the SCX API on startup (falls back to cache/preseed)
   const cmds: Array<[string, (...args: any[]) => any]> = [
@@ -1199,12 +1379,13 @@ export function activate(context: vscode.ExtensionContext) {
     ['kritical.scxcode.auditDiff', cmdAuditDiff],
     ['kritical.scxcode.newChat', cmdNewChat],
     ['kritical.scxcode.openSettings', cmdOpenSettings],
-    ['kritical.scxcode.manageMcp', cmdManageMcp],
+    ['kritical.scxcode.manageMcp', () => cmdSetupGui(context, 'mcp')],
     ['kritical.scxcode.explainFile', cmdExplainFile],
     ['kritical.scxcode.generateTests', cmdGenerateTests],
     ['kritical.scxcode.muxQuery', cmdMuxQuery],
     ['kritical.scxcode.scxCodex', () => cmdScxCodex(context)],
     ['kritical.scxcode.checkUpdate', () => cmdCheckUpdate(context)],
+    ['kritical.scxcode.setupGui', () => cmdSetupGui(context)],
   ];
   for (const [id, fn] of cmds) {
     context.subscriptions.push(vscode.commands.registerCommand(id, fn));
