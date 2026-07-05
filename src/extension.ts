@@ -78,26 +78,41 @@ function getConfig() {
 }
 
 // .5213 — the SCX model catalog surfaced in the in-panel dropdown (label + one-line detail).
-const SCX_MODEL_CATALOG: Array<{ id: string; detail: string }> = [
-  { id: 'MiniMax-M2.7', detail: '192K · default agentic' },
-  { id: 'MAGPiE', detail: '131K · near o4-mini reasoning' },
-  { id: 'gpt-oss-120b', detail: '131K · cheapest reasoner' },
-  { id: 'DeepSeek-V3.1', detail: '131K · hardest problems' },
-  { id: 'coder', detail: '196K · algorithms + debugging' },
-  { id: 'gemma-4-31B-it', detail: '131K · multimodal' },
-  { id: 'Llama-4-Maverick-17B-128E-Instruct', detail: '131K · multimodal' },
-  { id: 'Meta-Llama-3.3-70B-Instruct', detail: '131K · dense' },
-  { id: 'Qwen3-32B', detail: '32K · 119 languages' },
+// .5227 — each model carries its RECOMMENDED default temperature (temp): reasoners + the coder run
+// cold for determinism; multimodal/creative models run warmer. Selecting a model snaps the slider
+// to this default (until the operator overrides it), so every model gets a sane temperature.
+type ScxModel = { id: string; detail: string; temp: number };
+const SCX_MODEL_CATALOG: ScxModel[] = [
+  { id: 'MiniMax-M2.7', detail: '192K · default agentic', temp: 0.3 },
+  { id: 'MAGPiE', detail: '131K · near o4-mini reasoning', temp: 0.2 },
+  { id: 'gpt-oss-120b', detail: '131K · cheapest reasoner', temp: 0.2 },
+  { id: 'DeepSeek-V3.1', detail: '131K · hardest problems', temp: 0.2 },
+  { id: 'coder', detail: '196K · algorithms + debugging', temp: 0.1 },
+  { id: 'gemma-4-31B-it', detail: '131K · multimodal', temp: 0.6 },
+  { id: 'Llama-4-Maverick-17B-128E-Instruct', detail: '131K · multimodal', temp: 0.6 },
+  { id: 'Meta-Llama-3.3-70B-Instruct', detail: '131K · dense', temp: 0.4 },
+  { id: 'Qwen3-32B', detail: '32K · 119 languages', temp: 0.3 },
 ];
+const SCX_TEMP_FALLBACK = 0.2; // unknown/live models default cold — safest for a coding tool.
+function modelTempDefault(id: string): number {
+  const m = getModelCatalog().find((x) => x.id.toLowerCase() === (id || '').toLowerCase());
+  return m && typeof m.temp === 'number' ? m.temp : SCX_TEMP_FALLBACK;
+}
 
 // .5227 — LIVE model list from the SCX API with a JSON cache + preseed fallback.
 // On connect we GET {baseUrl}/v1/models, cache to ~/.kritical-scx/models-cache.json, and use it.
 // If the fetch fails we use the cache; if no cache, the hardcoded SCX_MODEL_CATALOG (preseed).
-let _liveModels: Array<{ id: string; detail: string }> | null = null;
+let _liveModels: ScxModel[] | null = null;
 const _modelsCachePath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'models-cache.json');
-function getModelCatalog(): Array<{ id: string; detail: string }> {
-  if (_liveModels && _liveModels.length) { return _liveModels; }
-  try { if (fs.existsSync(_modelsCachePath)) { const c = JSON.parse(fs.readFileSync(_modelsCachePath, 'utf8')); if (Array.isArray(c) && c.length) { return c; } } } catch { /* ignore */ }
+// .5227 — heal any catalog (live or older cache written before the temp field existed) so every
+// entry has a temp: backfill from the hardcoded defaults by id, else the cold fallback.
+function healTemps(list: ScxModel[]): ScxModel[] {
+  const byId = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m.temp]));
+  return list.map((m) => ({ id: m.id, detail: m.detail, temp: typeof m.temp === 'number' ? m.temp : (byId.get((m.id || '').toLowerCase()) ?? SCX_TEMP_FALLBACK) }));
+}
+function getModelCatalog(): ScxModel[] {
+  if (_liveModels && _liveModels.length) { return healTemps(_liveModels); }
+  try { if (fs.existsSync(_modelsCachePath)) { const c = JSON.parse(fs.readFileSync(_modelsCachePath, 'utf8')); if (Array.isArray(c) && c.length) { return healTemps(c); } } } catch { /* ignore */ }
   return SCX_MODEL_CATALOG; // preseed
 }
 function fetchLiveModels(): void {
@@ -112,8 +127,8 @@ function fetchLiveModels(): void {
           const j = JSON.parse(buf);
           const ids: string[] = Array.isArray(j.data) ? j.data.map((m: any) => m.id).filter(Boolean) : (Array.isArray(j.models) ? j.models.map((m: any) => m.id || m).filter(Boolean) : []);
           if (ids.length) {
-            const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m.detail]));
-            _liveModels = ids.map((id) => ({ id, detail: known.get(id.toLowerCase()) || 'live' }));
+            const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
+            _liveModels = ids.map((id) => { const k = known.get(id.toLowerCase()); return { id, detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK }; });
             try { fs.mkdirSync(path.dirname(_modelsCachePath), { recursive: true }); fs.writeFileSync(_modelsCachePath, JSON.stringify(_liveModels)); } catch { /* ignore */ }
           }
         } catch { /* keep cache/preseed */ }
@@ -828,13 +843,24 @@ const providerEl = document.getElementById('provider');
 const advBtn = document.getElementById('advBtn');
 const advPanel = document.getElementById('adv');
 const ctxChip = document.getElementById('ctxChip');
-modelEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'defaultModel', value: modelEl.value });
+// .5227 — per-model recommended temperature defaults (embedded at render). Selecting a model snaps
+// the slider to its default UNLESS the operator has manually overridden the temperature this session.
+const _modelTemps = ${JSON.stringify(Object.fromEntries(getModelCatalog().map((m) => [m.id, m.temp])))};
+const _tempFallback = ${SCX_TEMP_FALLBACK};
+let _tempUserSet = false;
+function _applyModelTemp(id, post) {
+  if (_tempUserSet) return;                                   // respect an explicit operator override
+  var t = (_modelTemps && typeof _modelTemps[id] === 'number') ? _modelTemps[id] : _tempFallback;
+  tempEl.value = String(t); tempVal.textContent = String(t);
+  if (post) vscode.postMessage({ type: 'setConfig', key: 'temperature', value: t });
+}
+modelEl.onchange = () => { vscode.postMessage({ type: 'setConfig', key: 'defaultModel', value: modelEl.value }); _applyModelTemp(modelEl.value, true); };
 lenEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'maxTokens', value: parseInt(lenEl.value, 10) });
 streamsEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'concurrency', value: parseInt(streamsEl.value, 10) });
 ctxEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'autoContext', value: ctxEl.value });
 providerEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'provider', value: providerEl.value });
 tempEl.oninput = () => { tempVal.textContent = tempEl.value; };
-tempEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'temperature', value: parseFloat(tempEl.value) });
+tempEl.onchange = () => { _tempUserSet = true; vscode.postMessage({ type: 'setConfig', key: 'temperature', value: parseFloat(tempEl.value) }); };
 advBtn.onclick = () => { advPanel.classList.toggle('open'); advBtn.classList.toggle('on'); };
 document.getElementById('tbUpload').onclick = () => vscode.postMessage({ type: 'uploadFile' });
 document.getElementById('tbRepo').onclick = () => vscode.postMessage({ type: 'attachRepo' });
@@ -886,6 +912,7 @@ window.addEventListener('message', (e) => {
     if (typeof m.concurrency === 'number') streamsEl.value = String(m.concurrency);
     if (m.autoContext) ctxEl.value = m.autoContext;
     if (m.provider) providerEl.value = m.provider;
+    // .5227 — load respects the persisted temperature; per-model snapping happens on interactive model change.
     if (typeof m.temperature === 'number') { tempEl.value = String(m.temperature); tempVal.textContent = String(m.temperature); }
     if (m.keyCount > 1) modelEl.title = 'SCX model · ' + m.keyCount + ' keys available';
   } else if (m.type === 'fileAttached') {
@@ -904,7 +931,7 @@ window.addEventListener('message', (e) => {
 // the real defaultModel (and the '…' placeholder resolves).
 vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.12</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.13</div>
 </body></html>`;
 }
 
