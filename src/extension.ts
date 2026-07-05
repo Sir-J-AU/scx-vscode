@@ -790,7 +790,7 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       });
       if (picked && picked.length) {
         const { block, fileCount, chars } = await collectAttachments(picked);
-        if (fileCount) { attached += block; panel.webview.postMessage({ type: 'fileAttached', name: folder ? `folder · ${fileCount} file(s)` : `${fileCount} file(s)`, chars }); }
+        if (fileCount) { attached += block; panel.webview.postMessage({ type: 'fileAttached', name: folder ? `folder · ${fileCount} file(s)` : `${fileCount} file(s)`, chars, preview: block.length > 12000 ? block.slice(0, 12000) + '\n\n_… preview truncated; the full contents are attached to your next message._' : block }); }
         else { panel.webview.postMessage({ type: 'error', error: folder ? 'No readable text files in that folder.' : 'No readable text files selected.' }); }
       }
     } else if (msg.type === 'attachRepo') {
@@ -866,6 +866,17 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
 .msg.assistant pre { background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0; font-family: var(--kr-mono); font-size: 12px; position: relative; }
 .msg.assistant code { font-family: var(--kr-mono); background: rgba(255,255,255,0.05); padding: 0 3px; border-radius: 2px; }
 .msg.assistant pre code { background: transparent; padding: 0; }
+.msg.attach { background: transparent; border: 1px solid var(--kr-border); border-left: 3px solid var(--kr-accent); padding: 0; max-width: 100%; overflow: hidden; }
+.attach-head { padding: 7px 10px; cursor: pointer; font-size: 12px; user-select: none; display: flex; align-items: center; gap: 5px; }
+.attach-head:hover { background: rgba(255,255,255,0.03); }
+.attach-caret { color: var(--kr-accent); font-size: 10px; width: 10px; display: inline-block; }
+.attach-hint { margin-left: auto; opacity: 0.5; font-size: 10px; }
+.attach-body { display: none; padding: 4px 10px 8px; border-top: 1px solid var(--kr-border); max-height: 420px; overflow: auto; }
+.attach-body.open { display: block; }
+.attach-body pre { background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; overflow-x: auto; margin: 4px 0; font-family: var(--kr-mono); font-size: 12px; position: relative; }
+.attach-body code { font-family: var(--kr-mono); background: rgba(255,255,255,0.05); padding: 0 3px; border-radius: 2px; }
+.attach-body pre code { background: transparent; padding: 0; }
+.attach-body .copy-btn { position: absolute; top: 4px; right: 4px; font-size: 10px; opacity: 0.6; cursor: pointer; background: var(--kr-panel); border: 1px solid var(--kr-border); color: var(--kr-fg); border-radius: 3px; padding: 1px 5px; }
 .copy-btn { position: absolute; top: 4px; right: 4px; background: var(--kr-primary); color: #fff; border: 0; padding: 2px 6px; font-size: 10px; border-radius: 3px; cursor: pointer; opacity: 0.7; }
 .copy-btn:hover { opacity: 1; }
 .meta { font-size: 10px; opacity: 0.65; margin-top: 4px; font-family: var(--kr-mono); }
@@ -990,6 +1001,28 @@ function add(role, text, meta, opts) {
   });
 }
 
+// .5231 — web-rendered local file preview: a collapsible card that renders the attached file
+// contents (syntax-fenced code + copy buttons) right in the panel, using the local machine's files.
+function addAttachPreview(name, chars, preview) {
+  const div = document.createElement('div');
+  div.className = 'msg attach';
+  const head = document.createElement('div');
+  head.className = 'attach-head';
+  head.innerHTML = '<span class="attach-caret">▸</span> 📎 <strong>' + esc(name) + '</strong> · ' + chars + ' chars <span class="attach-hint">click to preview</span>';
+  const body = document.createElement('div');
+  body.className = 'attach-body';
+  body.innerHTML = renderMarkdown(preview);
+  head.onclick = () => {
+    const open = body.classList.toggle('open');
+    head.querySelector('.attach-caret').textContent = open ? '▾' : '▸';
+  };
+  div.appendChild(head); div.appendChild(body);
+  chat.appendChild(div); chat.scrollTop = chat.scrollHeight;
+  body.querySelectorAll('.copy-btn').forEach(b => {
+    b.onclick = () => { const t = document.getElementById(b.dataset.copy); if (t) navigator.clipboard.writeText(t.textContent); b.textContent = 'copied ✓'; setTimeout(() => (b.textContent = 'copy'), 1500); };
+  });
+}
+
 // .5213 UI wave — control elements + wiring. Each change persists to config via the host.
 const lenEl = document.getElementById('len');
 const streamsEl = document.getElementById('streams');
@@ -1082,6 +1115,7 @@ window.addEventListener('message', (e) => {
     if (m.keyCount > 1) modelEl.title = 'SCX model · ' + m.keyCount + ' keys available';
   } else if (m.type === 'fileAttached') {
     ctxChip.textContent = '📎 ' + m.name + ' (' + m.chars + 'c)';
+    if (m.preview) { addAttachPreview(m.name, m.chars, m.preview); }
   } else if (m.type === 'notice') {
     add('assistant', m.text);
   } else if (m.type === 'keySwitched') {
@@ -1186,7 +1220,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
         });
         if (picked && picked.length) {
           const { block, fileCount, chars } = await collectAttachments(picked);
-          if (fileCount) { this._attached += block; view.webview.postMessage({ type: 'fileAttached', name: folder ? `folder · ${fileCount} file(s)` : `${fileCount} file(s)`, chars }); }
+          if (fileCount) { this._attached += block; view.webview.postMessage({ type: 'fileAttached', name: folder ? `folder · ${fileCount} file(s)` : `${fileCount} file(s)`, chars, preview: block.length > 12000 ? block.slice(0, 12000) + '\n\n_… preview truncated; the full contents are attached to your next message._' : block }); }
           else { view.webview.postMessage({ type: 'error', error: folder ? 'No readable text files in that folder.' : 'No readable text files selected.' }); }
         }
       } else if (msg.type === 'attachRepo') {
