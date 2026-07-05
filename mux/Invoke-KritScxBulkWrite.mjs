@@ -14,7 +14,8 @@ import { join, dirname } from 'node:path';
 const KEY = process.env.SCX_API_KEY;
 if (!KEY) { console.error('SCX_API_KEY not set (HKCU). Aborting — HR1: SCX only.'); process.exit(2); }
 const URL = 'https://api.scx.ai/v1/chat/completions';
-const REPO = 'C:/Users/joshl/OneDrive - Kritical Pty Ltd/Github/Kritical.SCXCode';
+// Repo the ctx files are read from. Override with KRIT_BULK_REPO to ground on a sister repo.
+const REPO = process.env.KRIT_BULK_REPO || 'C:/Users/joshl/OneDrive - Kritical Pty Ltd/Github/Kritical.SCXCode';
 const STAGE = 'C:/Users/joshl/AppData/Local/Temp/claude/C--/ba4a3c54-64ce-4d9a-8fc4-89f1e70a856e/scratchpad/scx-drafts';
 
 // Real proven ceilings (docs/SCX-MUX-STORAGE-CONTEXT-PROOF.md) — size grounding to the model.
