@@ -4,7 +4,7 @@
     "lastUpdated": "2026-06-25",
     "inventoryDoc": "Github/KRTPax8ToShopifyConnector/reference/KRITICAL-BRAND-ASSET-INVENTORY-1507.md",
     "canonicalBrandGuide": "Huzaifa OneDrive: Kritical Branding Folder/Kritical Brand Guide.pdf",
-    "note": "Single source of truth for Kritical brand spec. Consumed by Krit.OmniFramework (Write-KritBanner, future New-KritBrandedDocument) + per-customer proposal renderers. Any change here MUST be reflected in the inventory doc + Brand Guide PDF."
+    "note": "Single source of truth for Kritical brand spec. Consumed by Kritical.PS.OmniFramework (Write-KritBanner, future New-KritBrandedDocument) + per-customer proposal renderers. Any change here MUST be reflected in the inventory doc + Brand Guide PDF."
   },
   "entity": {
     "legalName": "Kritical Pty Ltd",

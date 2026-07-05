@@ -22,5 +22,26 @@
   "MD024": { "siblings_only": true },
 
   // Bare autolinks are valid HTML and render fine.
-  "MD034": false
+  "MD034": false,
+
+  // CLAUDE.md style — dash-bullet lists (`- item`) not plus-bullets.
+  // Match the KRT parent rulebook convention.
+  "MD004": { "style": "dash" },
+
+  // CLAUDE.md HARD RULE blockquote blocks contain lists preceded/followed
+  // by numbered items with no blank line — the semantic grouping is tight
+  // and forcing blank lines breaks readability.
+  "MD032": false,
+
+  // Fenced code blocks without a language tag are used deliberately in
+  // architecture ASCII diagrams + pseudo-code where "text" would be wrong.
+  "MD040": false,
+
+  // Nested numbered lists in CLAUDE.md contract blocks use consistent
+  // indentation matched to the parent rulebook. Don't nag.
+  "MD007": false,
+
+  // Multiple spaces after list marker used in CLAUDE.md contract tables
+  // for alignment. Human-readable > lint-clean.
+  "MD030": false
 }

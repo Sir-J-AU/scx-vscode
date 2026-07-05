@@ -20,6 +20,11 @@ param([Parameter(Mandatory)][string]$Task,
       [int]$Concurrency=4, [string]$Model='scx-coder',
       [string]$SessionId="mux-$(Get-Date -Format yyyyMMddHHmmss)")
 $ErrorActionPreference='Continue'
+# HARD requirement: ForEach-Object -Parallel + $using: are PowerShell 7+ only. Under Windows PowerShell 5.1
+# the parallel block silently resolves to 0 shards. Fail clearly instead of producing an empty result.
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+  throw "Invoke-KritScxMux requires PowerShell 7+ (ForEach-Object -Parallel). Launch with 'pwsh', not 'powershell.exe'."
+}
 $base='http://127.0.0.1:4180/v1/chat/completions'; $key='sk-kritical-scx-local'
 $venvPy='C:\KriticalSCX\venv-litellm-test\Scripts\python.exe'
 
@@ -38,10 +43,16 @@ $summaries = $items | ForEach-Object -ThrottleLimit $Concurrency -Parallel {
 }
 Write-Host "  $($summaries.Count) shard summaries in $($sw.ElapsedMilliseconds)ms" -ForegroundColor Green
 
-# (c) persist shards to context_shard (pyodbc)
+# (c) persist shards to context_shard (pyodbc). Write JSON BOM-free so python json.load doesn't choke.
 $rows = $summaries | ForEach-Object { [pscustomobject]@{ session_id=$SessionId; source_ref=$_.source_ref; content=$_.content; token_count=$_.token_count } }
-$tmp="$env:TEMP\mux-shards-$(Get-Random).json"; $rows | ConvertTo-Json -Depth 6 | Set-Content $tmp -Encoding utf8
-if (Test-Path $venvPy) { & $venvPy "$PSScriptRoot\mux_shards_ingest.py" $tmp 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray } }
+$tmp="$env:TEMP\mux-shards-$(Get-Random).json"
+[System.IO.File]::WriteAllText($tmp, ($rows | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+if (Test-Path $venvPy) {
+  $ingestOut = & $venvPy "$PSScriptRoot\mux_shards_ingest.py" $tmp 2>&1
+  $ingestOk  = ($LASTEXITCODE -eq 0)
+  $ingestOut | ForEach-Object { Write-Host "  $_" -ForegroundColor $(if($ingestOk){'Green'}else{'Red'}) }
+  if (-not $ingestOk) { Write-Warning "SHARD PERSISTENCE FAILED — context_shard NOT updated for session $SessionId" }
+} else { Write-Warning "venv python missing at $venvPy — shards NOT persisted to context_shard" }
 Remove-Item $tmp -EA SilentlyContinue
 
 # (d) synthesiser — merge shard summaries into one answer

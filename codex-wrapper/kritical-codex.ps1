@@ -65,6 +65,7 @@ $brandSpecPath = Join-Path $assetsDir 'brand-spec.json'
 # HR29 preflight — never overwrite operator vars, never disrupt Claude Code
 # ------------------------------------------------------------
 $origOpenAIBaseUrl = $env:OPENAI_BASE_URL   # remember current process state
+$origOpenAIKey     = $env:OPENAI_API_KEY    # .5214 — restore this too so the local proxy dummy key never leaks
 $origAnthropicBaseUrl = $env:ANTHROPIC_BASE_URL
 
 # HR29 hard invariant: we NEVER touch ANTHROPIC_BASE_URL. Ever.
@@ -217,7 +218,8 @@ try {
 } finally {
     # HR29: restore original env — wrapper leaves zero residue
     $env:OPENAI_BASE_URL = $origOpenAIBaseUrl
-    # ANTHROPIC_BASE_URL was never touched
+    $env:OPENAI_API_KEY  = $origOpenAIKey   # .5214 — restore so the sk-kritical-scx-local dummy never persists
+    # ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY were NEVER touched — Claude Code unaffected (HR29)
     Remove-Item Env:KRITICAL_CODEX_DEFAULT_MODEL -ErrorAction SilentlyContinue
 }
 

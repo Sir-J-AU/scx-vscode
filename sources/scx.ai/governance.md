@@ -1,0 +1,9 @@
+---
+url: https://scx.ai/governance
+captured_utc: 2026-07-04T02:28:09.4924707Z
+status: 200
+content_type: text/html; charset=utf-8
+depth: 1
+crawler: Save-KritScxSourcesRecursively.ps1
+---
+Company Platform Solutions Models Compare Sign In Corporate Governance SCX.ai Holdings Limited is committed to maintaining the highest standards of corporate governance. Our policies and practices are designed to ensure accountability, transparency, and responsible management. Our governance framework emphasises independence, transparent reporting, responsible AI, security-by-design and fair remuneration aligned to long-term value creation. Governance Resources Access our corporate governance documentation and investor resources. Corporate Governance Statement Governance principles compliance and disclosure Board & Skills Matrix Board composition, independence, and director skills Charters & Policies Download governance charters and policy documents Whistleblower Portal Secure disclosure reporting and policy information Contact Information For governance and investor enquiries, please contact: Company Secretary [email&#160;protected] +61 2 8006 0111 Investor Relations [email&#160;protected] Media Enquiries [email&#160;protected] Registered Office SCX.ai Holdings Limited Unit 404, 22-32 Sutherland Street Cremorne, New South Wales 2090 Australia High speed sovereign AI inferencing Cloud Company About Sovereignty assessment Technical sovereignty audit Sustainability Solutions Partner Program AI Enablement & Support Contact Trust Center Privacy Policy Platform Available Models MAGPiE Societies Inference as a Service Container Deployment Developers Investors Investor Relations Corporate Governance Board of Directors Charters & Policies Media Resources Press Blog White Paper Contact Have questions? We&#x27;d love to hear from you. Get in Touch © 2026 SCX.ai. All rights reserved. Corporate Governance - SCX.ai Holdings Limited

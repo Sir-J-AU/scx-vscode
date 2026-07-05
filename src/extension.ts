@@ -17,7 +17,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 
 interface ScxMessage { role: 'user' | 'assistant' | 'system'; content: string; }
-interface ScxCompletionRequest { model: string; messages: ScxMessage[]; max_tokens?: number; system?: string; }
+interface ScxCompletionRequest { model: string; messages: ScxMessage[]; max_tokens?: number; system?: string; temperature?: number; }
 interface ScxCompletionResponse {
   id: string;
   type: 'message';
@@ -31,6 +31,16 @@ interface ScxCompletionResponse {
 // ────────────────────────────────────────────────────────────────
 // config resolution
 // ────────────────────────────────────────────────────────────────
+
+// .5211 (Lens/Brain bug-hunt, DeepSeek-verified) — single cached output channel instead of
+// creating a new "Kritical SCXCode" channel on every command (was 4 duplicate channels).
+let _outputChannel: vscode.OutputChannel | undefined;
+function getOutputChannel(): vscode.OutputChannel {
+  if (!_outputChannel) { _outputChannel = vscode.window.createOutputChannel('Kritical SCXCode'); }
+  return _outputChannel;
+}
+// .5211 — real rotating key pointer (was hardcoded to apiKeys[1]/index 2, so 3+ keys never rotated).
+let _keyRotation = 0;
 
 function getConfig() {
   const c = vscode.workspace.getConfiguration('kritical.scxcode');
@@ -59,7 +69,44 @@ function getConfig() {
     // .5165h — provider selection + claude-code CLI fallback path
     provider: c.get<'auto' | 'scx-native' | 'claude-code-cli'>('provider', 'auto'),
     claudeCliPath: c.get<string>('claudeCliPath', 'claude'),
+    // .5210 — operator-selectable response length (was hardcoded 800/1200/1500).
+    maxTokens: c.get<number>('maxTokens', 1500),
+    // .5213 UI wave — synthetic-context concurrency (mux) + sampling temperature.
+    concurrency: c.get<number>('concurrency', 1),
+    temperature: c.get<number>('temperature', 0.2),
   };
+}
+
+// .5213 — the SCX model catalog surfaced in the in-panel dropdown (label + one-line detail).
+const SCX_MODEL_CATALOG: Array<{ id: string; detail: string }> = [
+  { id: 'MiniMax-M2.7', detail: '192K · default agentic' },
+  { id: 'MAGPiE', detail: '131K · near o4-mini reasoning' },
+  { id: 'gpt-oss-120b', detail: '131K · cheapest reasoner' },
+  { id: 'DeepSeek-V3.1', detail: '131K · hardest problems' },
+  { id: 'coder', detail: '196K · algorithms + debugging' },
+  { id: 'gemma-4-31B-it', detail: '131K · multimodal' },
+  { id: 'Llama-4-Maverick-17B-128E-Instruct', detail: '131K · multimodal' },
+  { id: 'Meta-Llama-3.3-70B-Instruct', detail: '131K · dense' },
+  { id: 'Qwen3-32B', detail: '32K · 119 languages' },
+];
+
+// .5213 — read-only MCP-server summary for the panel's 🔌 MCP button (Codex config.toml).
+function mcpSummary(): string {
+  const lines: string[] = ['**MCP servers & tools**', ''];
+  try {
+    const cfgPath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.codex', 'config.toml');
+    if (fs.existsSync(cfgPath)) {
+      const toml = fs.readFileSync(cfgPath, 'utf8');
+      const names = Array.from(toml.matchAll(/\[mcp_servers\.([^\]]+)\]/g)).map((mm) => mm[1]);
+      lines.push(names.length ? 'Codex MCP servers: ' + names.join(', ') : 'No MCP servers found in ~/.codex/config.toml.');
+    } else {
+      lines.push('No ~/.codex/config.toml found on this machine.');
+    }
+  } catch (e) {
+    lines.push('Could not read MCP config: ' + (e as Error).message);
+  }
+  lines.push('', '_Toggle MCP servers in the Kritical Plugin Control Panel._');
+  return lines.join('\n');
 }
 
 // .5165h — resolve claude CLI path. cmd.exe doesn't inherit git-bash PATH so
@@ -116,13 +163,17 @@ async function askClaudeCodeCli(prompt: string, systemPrompt: string): Promise<s
     let stderr = '';
     child.stdout.on('data', (c) => (stdout += c));
     child.stderr.on('data', (c) => (stderr += c));
-    child.on('error', (e) => reject(new Error(`claude CLI spawn failed: ${e.message} (configured='${cfg.claudeCliPath}', resolved='${resolvedPath}')`)));
+    // .5213 (DeepSeek-flagged, verified) — clear the kill-timer on settle so it doesn't linger
+    // for 180s keeping the event loop alive + firing kill() on an already-exited child.
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    child.on('error', (e) => { if (killTimer) clearTimeout(killTimer); reject(new Error(`claude CLI spawn failed: ${e.message} (configured='${cfg.claudeCliPath}', resolved='${resolvedPath}')`)); });
     child.on('close', (code) => {
+      if (killTimer) clearTimeout(killTimer);
       if (code === 0) resolve(stdout.trim());
       else reject(new Error(`claude CLI exit=${code}: ${stderr.slice(0, 500) || stdout.slice(0, 500)}`));
     });
     // 180 s cap — first spawn on cold session can be slow (Claude Code startup + workspace-scan)
-    setTimeout(() => {
+    killTimer = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
       reject(new Error('claude CLI timeout after 180s'));
     }, 180_000);
@@ -179,10 +230,10 @@ function buildAutoContext(): string {
 // ────────────────────────────────────────────────────────────────
 
 async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, keyOverride: string | null = null): Promise<ScxCompletionResponse> {
-  const { apiKey, baseUrl, systemPrompt } = getConfig();
+  const { apiKey, baseUrl, systemPrompt, temperature } = getConfig();
   const useKey = keyOverride || apiKey;
   if (!useKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
-  const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens };
+  const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens, temperature };
   if (systemPrompt) body.system = systemPrompt;
 
   return new Promise((resolve, reject) => {
@@ -302,12 +353,55 @@ async function scxPostWithFailover(messages: ScxMessage[], maxTokens = 800): Pro
 }
 
 // ────────────────────────────────────────────────────────────────
+// .5214 — synthetic-context MUX (the mux engine, wired into the panel)
+// Fans out N concurrent SCX "lens" streams over the same prompt, then synthesises
+// ONE answer. concurrency=1 = plain single call. This is the in-panel equivalent of
+// the PowerShell Invoke-KritScxMux — same fan-out → synthesise shape, SCX-only.
+// ────────────────────────────────────────────────────────────────
+const MUX_LENSES = [
+  'Answer directly and correctly.',
+  'Focus on edge cases, failure modes, and what could go wrong.',
+  'Focus on the simplest, most maintainable approach.',
+  'Focus on security, performance, and hidden costs.',
+  'Focus on concrete examples and exact steps.',
+  'Challenge assumptions the question takes for granted.',
+  'Focus on the broader architecture and how this fits the whole system.',
+  'Focus on how to test and verify the answer.',
+];
+
+async function scxMux(messages: ScxMessage[], concurrency: number, maxTokens: number):
+    Promise<{ res: ScxCompletionResponse; modelUsed: string; keyIndex: number; shards: number }> {
+  const n = Math.max(1, Math.min(Math.floor(concurrency) || 1, 8));
+  if (n === 1) {
+    const single = await scxPostWithFailover(messages, maxTokens);
+    return { res: single.res, modelUsed: single.modelUsed, keyIndex: single.keyIndex, shards: 1 };
+  }
+  const lastUser = messages.length ? messages[messages.length - 1].content : '';
+  const shardCalls = Array.from({ length: n }, (_, i) => {
+    const lens = MUX_LENSES[i % MUX_LENSES.length];
+    const shardMsgs: ScxMessage[] = [...messages.slice(0, -1), { role: 'user', content: `${lastUser}\n\n[Focus for this stream: ${lens}]` }];
+    return scxPostWithFailover(shardMsgs, Math.min(maxTokens, 700)).then(
+      (r) => r.res.content.map((c) => c.text).join(''),
+      (e) => `(stream failed: ${(e as Error).message})`,
+    );
+  });
+  const shards = await Promise.all(shardCalls);
+  const merged = shards.map((s, i) => `--- Stream ${i + 1} ---\n${s}`).join('\n\n');
+  const synthMsgs: ScxMessage[] = [{
+    role: 'user',
+    content: `Question:\n${lastUser}\n\nBelow are ${n} independent answers from parallel SCX streams. Synthesise them into ONE authoritative answer — resolve disagreements, keep the strongest points, drop weak/wrong ones. Do NOT mention "streams" or "perspectives" in your answer.\n\n${merged}`,
+  }];
+  const synth = await scxPostWithFailover(synthMsgs, maxTokens);
+  return { res: synth.res, modelUsed: synth.modelUsed, keyIndex: synth.keyIndex, shards: n };
+}
+
+// ────────────────────────────────────────────────────────────────
 // commands
 // ────────────────────────────────────────────────────────────────
 
 async function cmdTestConnection() {
   const cfg = getConfig();
-  const out = vscode.window.createOutputChannel('Kritical SCXCode');
+  const out = getOutputChannel();
   out.show(true);
   out.appendLine('═══ Kritical SCXCode connection test ═══');
   out.appendLine(`  baseUrl      : ${cfg.baseUrl}`);
@@ -372,7 +466,7 @@ async function cmdShowStatus() {
   md.appendMarkdown(`- **Telemetry**: \`${cfg.telemetry}\`\n\n`);
   md.appendMarkdown(`Run **Kritical: Test SCX Connection** to probe the endpoint live.\n`);
   vscode.window.showInformationMessage('Kritical SCXCode — see Output panel for detail');
-  const out = vscode.window.createOutputChannel('Kritical SCXCode');
+  const out = getOutputChannel();
   out.show(true);
   out.appendLine(md.value);
 }
@@ -398,7 +492,7 @@ async function cmdAuditDiff() {
 }
 
 async function runChat(prompt: string) {
-  const out = vscode.window.createOutputChannel('Kritical SCXCode');
+  const out = getOutputChannel();
   out.show(true);
   // .5165e — auto-context prefix. Editor state gets injected as a system-prefix
   // block so the model knows what the operator is looking at.
@@ -407,7 +501,7 @@ async function runChat(prompt: string) {
   out.appendLine(`\n[chat] ${prompt.slice(0, 100)}${prompt.length > 100 ? '…' : ''}`);
   if (ctx) out.appendLine(`[auto-context] ${ctx.length} chars injected`);
   try {
-    const { res, modelUsed, keyIndex } = await scxPostWithFailover([{ role: 'user', content: fullPrompt }], 1500);
+    const { res, modelUsed, keyIndex } = await scxPostWithFailover([{ role: 'user', content: fullPrompt }], getConfig().maxTokens);
     const text = res.content.map((c) => c.text).join('');
     const keyLabel = keyIndex > 1 ? ` · key${keyIndex}` : '';
     out.appendLine(`\n[reply · ${modelUsed}${keyLabel} · ${res.usage.output_tokens} tok]\n${text}\n`);
@@ -424,16 +518,36 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
     { enableScripts: true, retainContextWhenHidden: true },
   );
   panel.webview.html = chatHtml();
+  // .5210 BUGFIX — this handler previously read msg.history (never sent by the webview,
+  // which posts {type:'chat', text}). Result: scxPostWithFailover(undefined) → 400 → every
+  // send in the panel failed. Now we maintain history here and read msg.text, mirroring the sidebar.
+  const history: ScxMessage[] = [];
   panel.webview.onDidReceiveMessage(async (msg) => {
     if (msg.type === 'chat') {
+      history.push({ role: 'user', content: msg.text });
       try {
-        const { res, modelUsed } = await scxPostWithFailover(msg.history, 1200);
-        panel.webview.postMessage({ type: 'reply', text: res.content.map((c) => c.text).join(''), model: modelUsed, tokensIn: res.usage.input_tokens, tokensOut: res.usage.output_tokens });
+        const cfg = getConfig();
+        const ctxPrefix = buildAutoContext();
+        const messagesForApi: ScxMessage[] = [...history];
+        if (ctxPrefix && messagesForApi.length > 0) {
+          messagesForApi[messagesForApi.length - 1] = { role: 'user', content: ctxPrefix + msg.text };
+        }
+        const { res, modelUsed, keyIndex, shards } = await scxMux(messagesForApi, cfg.concurrency, cfg.maxTokens);
+        const replyText = res.content.map((c) => c.text).join('');
+        history.push({ role: 'assistant', content: replyText });
+        panel.webview.postMessage({ type: 'reply', text: replyText, model: modelUsed, keyIndex, shards, tokensIn: res.usage.input_tokens, tokensOut: res.usage.output_tokens, autoContextChars: ctxPrefix.length });
       } catch (e) {
         panel.webview.postMessage({ type: 'error', error: (e as Error).message });
       }
+    } else if (msg.type === 'clear') {
+      history.length = 0;
+      panel.webview.postMessage({ type: 'cleared' });
+    } else if (msg.type === 'pickModel') {
+      await vscode.commands.executeCommand('kritical.scxcode.pickModel');
+      panel.webview.postMessage({ type: 'config', model: getConfig().defaultModel, keyCount: getConfig().apiKeys.length });
     } else if (msg.type === 'config') {
-      panel.webview.postMessage({ type: 'config', config: getConfig() });
+      const cfg = getConfig();
+      panel.webview.postMessage({ type: 'config', model: cfg.defaultModel, keyCount: cfg.apiKeys.length, autoContext: cfg.autoContext });
     }
   });
   panel.webview.postMessage({ type: 'ready' });
@@ -458,14 +572,27 @@ function chatHtml(): string {
   --kr-mono: var(--vscode-editor-font-family, ui-monospace, Consolas, monospace);
 }
 * { box-sizing: border-box; }
-body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0; background: var(--kr-bg); color: var(--kr-fg); font-size: var(--vscode-font-size, 13px); }
-.top { background: var(--kr-primary); color: #fff; padding: 8px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--kr-accent); }
+body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0; background: var(--kr-bg); color: var(--kr-fg); font-size: var(--vscode-font-size, 13px); display: flex; flex-direction: column; height: 100vh; }
+.top { background: var(--kr-primary); color: #fff; padding: 8px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--kr-accent); flex-shrink: 0; }
 .top .brand { font-weight: 600; letter-spacing: 0.3px; display: flex; align-items: center; gap: 6px; }
 .top .brand::before { content: '◆'; color: var(--kr-accent); font-size: 14px; }
-.top .model-badge { margin-left: auto; font-family: var(--kr-mono); font-size: 11px; padding: 2px 8px; background: rgba(255,255,255,0.15); border-radius: 3px; cursor: pointer; }
+.model-select { margin-left: auto; max-width: 210px; background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.25); border-radius: 3px; font-size: 11px; padding: 2px 4px; font-family: var(--kr-mono); }
 .top .clear-btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 3px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
 .top .clear-btn:hover { background: rgba(255,255,255,0.15); }
-#chat { padding: 12px; overflow-y: auto; height: calc(100vh - 130px); }
+.tagline { background: var(--kr-primary); color: rgba(255,255,255,0.82); font-size: 10px; padding: 0 12px 6px; font-style: italic; flex-shrink: 0; }
+.controls { display: flex; gap: 12px; align-items: center; padding: 5px 12px; background: var(--kr-panel); border-bottom: 1px solid var(--kr-border); flex-wrap: wrap; flex-shrink: 0; }
+.controls label { font-size: 11px; opacity: 0.85; display: flex; gap: 4px; align-items: center; }
+.controls select, .adv select, .adv input { background: var(--kr-bg); color: var(--kr-fg); border: 1px solid var(--kr-border); border-radius: 3px; font-size: 11px; padding: 1px 3px; }
+.adv-btn { margin-left: auto; background: transparent; border: 1px solid var(--kr-border); color: var(--kr-fg); border-radius: 3px; cursor: pointer; padding: 1px 7px; font-size: 12px; }
+.adv-btn:hover, .adv-btn.on { border-color: var(--kr-accent); color: var(--kr-accent); }
+.adv { display: none; gap: 14px; align-items: center; padding: 5px 12px; background: var(--kr-panel); border-bottom: 1px solid var(--kr-border); flex-shrink: 0; }
+.adv.open { display: flex; }
+.adv label { font-size: 11px; display: flex; gap: 6px; align-items: center; }
+.toolbar { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.tool-btn { background: var(--kr-bg); color: var(--kr-fg); border: 1px solid var(--kr-border); border-radius: 3px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+.tool-btn:hover { border-color: var(--kr-accent); }
+.ctx-chip { font-size: 10px; opacity: 0.7; font-family: var(--kr-mono); margin-left: auto; }
+#chat { padding: 12px; overflow-y: auto; flex: 1 1 auto; }
 .msg { padding: 8px 10px; margin: 6px 0; border-radius: 5px; max-width: 92%; word-wrap: break-word; }
 .msg.user { background: var(--kr-user-bg); color: #ffffff; margin-left: auto; }
 .msg.assistant { background: var(--kr-panel); color: var(--kr-fg); border: 1px solid var(--kr-border); }
@@ -478,7 +605,8 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
 .meta { font-size: 10px; opacity: 0.65; margin-top: 4px; font-family: var(--kr-mono); }
 .error-actions { margin-top: 6px; display: flex; gap: 6px; }
 .error-actions button { background: #fff; color: var(--kr-danger); border: 0; padding: 3px 10px; font-size: 11px; border-radius: 3px; cursor: pointer; font-weight: 600; }
-.input { position: fixed; bottom: 0; left: 0; right: 0; padding: 8px 12px; background: var(--kr-panel); border-top: 1px solid var(--kr-border); display: flex; gap: 6px; }
+.input { padding: 8px 12px; background: var(--kr-panel); border-top: 1px solid var(--kr-border); display: flex; flex-direction: column; flex-shrink: 0; }
+.input-row { display: flex; gap: 6px; }
 .input textarea { flex: 1; padding: 6px 8px; border: 1px solid var(--kr-border); border-radius: 4px; font-family: var(--vscode-font-family); font-size: 13px; background: var(--kr-bg); color: var(--kr-fg); resize: none; min-height: 38px; max-height: 200px; }
 .input button.send { padding: 6px 14px; background: var(--kr-primary); color: #fff; border: 0; border-radius: 4px; cursor: pointer; font-weight: 500; }
 .input button.send:hover { background: #1a4574; }
@@ -489,13 +617,32 @@ body { font-family: var(--vscode-font-family, system-ui, sans-serif); margin: 0;
 </style></head><body>
 <div class="top">
   <div class="brand">Kritical SCXCode</div>
-  <div class="model-badge" id="model" title="Click to change">MiniMax-M2.7</div>
-  <button class="clear-btn" id="clear">Clear</button>
+  <select class="model-select" id="model" title="SCX model"></select>
+  <button class="clear-btn" id="clear" title="Clear chat">Clear</button>
+</div>
+<div class="tagline">The IT &amp; IT Security Experts — if it's too hard for everyone else, just give us a call.</div>
+<div class="controls">
+  <label>Length <select id="len"><option value="800">Short</option><option value="1500">Medium</option><option value="4096">Long</option><option value="8192">Maximum</option></select></label>
+  <label>Streams <select id="streams"><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="6">6</option><option value="8">8</option></select></label>
+  <label>Context <select id="ctx"><option value="off">Off</option><option value="file">File</option><option value="file+selection">File+Sel</option><option value="workspace-tree">Workspace</option></select></label>
+  <button class="adv-btn" id="advBtn" title="Advanced options">⚙</button>
+</div>
+<div class="adv" id="adv">
+  <label>Temp <input type="range" id="temp" min="0" max="1" step="0.1" value="0.2"><span id="tempVal">0.2</span></label>
+  <label>Provider <select id="provider"><option value="auto">Auto (SCX→Claude CLI)</option><option value="scx-native">SCX only</option><option value="claude-code-cli">Claude CLI only</option></select></label>
 </div>
 <div id="chat"></div>
 <div class="input">
-  <textarea id="in" placeholder="Ask anything… (Shift+Enter for newline)"></textarea>
-  <button class="send" id="send">Send</button>
+  <div class="toolbar">
+    <button class="tool-btn" id="tbUpload" title="Upload a file into the next message">📎 File</button>
+    <button class="tool-btn" id="tbRepo" title="Attach a workspace file summary">📁 Repo</button>
+    <button class="tool-btn" id="tbMcp" title="MCP servers &amp; tools">🔌 MCP</button>
+    <span class="ctx-chip" id="ctxChip"></span>
+  </div>
+  <div class="input-row">
+    <textarea id="in" placeholder="Ask anything… (Shift+Enter for newline)"></textarea>
+    <button class="send" id="send">Send</button>
+  </div>
 </div>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
@@ -571,7 +718,27 @@ function add(role, text, meta, opts) {
   });
 }
 
-modelEl.onclick = () => vscode.postMessage({ type: 'pickModel' });
+// .5213 UI wave — control elements + wiring. Each change persists to config via the host.
+const lenEl = document.getElementById('len');
+const streamsEl = document.getElementById('streams');
+const ctxEl = document.getElementById('ctx');
+const tempEl = document.getElementById('temp');
+const tempVal = document.getElementById('tempVal');
+const providerEl = document.getElementById('provider');
+const advBtn = document.getElementById('advBtn');
+const advPanel = document.getElementById('adv');
+const ctxChip = document.getElementById('ctxChip');
+modelEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'defaultModel', value: modelEl.value });
+lenEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'maxTokens', value: parseInt(lenEl.value, 10) });
+streamsEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'concurrency', value: parseInt(streamsEl.value, 10) });
+ctxEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'autoContext', value: ctxEl.value });
+providerEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'provider', value: providerEl.value });
+tempEl.oninput = () => { tempVal.textContent = tempEl.value; };
+tempEl.onchange = () => vscode.postMessage({ type: 'setConfig', key: 'temperature', value: parseFloat(tempEl.value) });
+advBtn.onclick = () => { advPanel.classList.toggle('open'); advBtn.classList.toggle('on'); };
+document.getElementById('tbUpload').onclick = () => vscode.postMessage({ type: 'uploadFile' });
+document.getElementById('tbRepo').onclick = () => vscode.postMessage({ type: 'attachRepo' });
+document.getElementById('tbMcp').onclick = () => vscode.postMessage({ type: 'listMcp' });
 clearBtn.onclick = () => {
   chat.innerHTML = '';
   sessionInTokens = 0; sessionOutTokens = 0;
@@ -597,8 +764,9 @@ window.addEventListener('message', (e) => {
     sessionOutTokens += (m.tokensOut || 0);
     const keyLabel = m.keyIndex > 1 ? ' · key' + m.keyIndex : '';
     const ctxLabel = m.autoContextChars > 0 ? ' · ctx ' + m.autoContextChars + 'c' : '';
-    add('assistant', m.text, m.model + keyLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
-    modelEl.textContent = m.model;
+    const muxLabel = m.shards > 1 ? ' · muxed ×' + m.shards : '';
+    add('assistant', m.text, m.model + keyLabel + muxLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
+    if (m.model) modelEl.value = m.model;
     send.disabled = false;
   } else if (m.type === 'error') {
     const is429 = /429|rate.limit|Daily token limit/i.test(m.error);
@@ -609,15 +777,33 @@ window.addEventListener('message', (e) => {
   } else if (m.type === 'ready') {
     vscode.postMessage({ type: 'config' });
   } else if (m.type === 'config') {
-    if (m.model) modelEl.textContent = m.model;
-    if (m.keyCount > 1) modelEl.title = 'Click to change model · ' + m.keyCount + ' SCX keys available';
+    if (Array.isArray(m.models) && modelEl.options.length === 0) {
+      m.models.forEach(function (mo) { var o = document.createElement('option'); o.value = mo.id; o.textContent = mo.id + (mo.detail ? ' — ' + mo.detail : ''); modelEl.appendChild(o); });
+    }
+    if (m.model) modelEl.value = m.model;
+    if (typeof m.maxTokens === 'number') lenEl.value = String(m.maxTokens);
+    if (typeof m.concurrency === 'number') streamsEl.value = String(m.concurrency);
+    if (m.autoContext) ctxEl.value = m.autoContext;
+    if (m.provider) providerEl.value = m.provider;
+    if (typeof m.temperature === 'number') { tempEl.value = String(m.temperature); tempVal.textContent = String(m.temperature); }
+    if (m.keyCount > 1) modelEl.title = 'SCX model · ' + m.keyCount + ' keys available';
+  } else if (m.type === 'fileAttached') {
+    ctxChip.textContent = '📎 ' + m.name + ' (' + m.chars + 'c)';
+  } else if (m.type === 'notice') {
+    add('assistant', m.text);
   } else if (m.type === 'keySwitched') {
     add('assistant', '_🔑 Switched to key #' + m.newKeyIndex + ' — retry your last message._');
     send.disabled = false;
   }
 });
+
+// .5210 RACE FIX — the extension posts {type:'ready'} from resolveWebviewView, but that can
+// fire before this script's message listener attaches, dropping it → the model badge stayed
+// stuck on its hardcoded default. Request config ourselves on load so the badge always reflects
+// the real defaultModel (and the '…' placeholder resolves).
+vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© Kritical Pty Ltd · v0.1.2 · canonical brand · claude-code fallback</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.9</div>
 </body></html>`;
 }
 
@@ -631,6 +817,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'kritical.scxcode.chat';
   private _view?: vscode.WebviewView;
   private _history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  private _attached = ''; // .5213 — uploaded-file / attached-repo context prepended to the next message
 
   resolveWebviewView(view: vscode.WebviewView) {
     this._view = view;
@@ -640,8 +827,8 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
       if (msg.type === 'chat') {
         this._history.push({ role: 'user', content: msg.text });
         try {
-          // Prepend auto-context from the active editor
-          const ctx = buildAutoContext();
+          // Prepend auto-context from the active editor + any attached file/repo context.
+          const ctx = buildAutoContext() + this._attached;
           const messagesForApi: ScxMessage[] = [...this._history];
           if (ctx && messagesForApi.length > 0) {
             messagesForApi[messagesForApi.length - 1] = {
@@ -649,7 +836,9 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
               content: ctx + msg.text,
             };
           }
-          const { res, modelUsed, keyIndex } = await scxPostWithFailover(messagesForApi, 1200);
+          this._attached = ''; // consumed
+          const cfg = getConfig();
+          const { res, modelUsed, keyIndex, shards } = await scxMux(messagesForApi, cfg.concurrency, cfg.maxTokens);
           const replyText = res.content.map((c) => c.text).join('');
           this._history.push({ role: 'assistant', content: replyText });
           view.webview.postMessage({
@@ -657,6 +846,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
             text: replyText,
             model: modelUsed,
             keyIndex,
+            shards,
             tokensIn: res.usage.input_tokens,
             tokensOut: res.usage.output_tokens,
             autoContextChars: ctx.length,
@@ -678,21 +868,55 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
             view.webview.postMessage({ type: 'error', error: 'Only one SCX key available (SCX_API_KEY). Set SCX_API_KEY_2..9 in HKCU or run Switch-KritScxKey.' });
             return;
           }
-          // Rotate: shift first to end.
-          const next = cfg.apiKeys[1];
-          const newIndex = 2;
+          // .5211 (DeepSeek-flagged, verified) — actually ROTATE through all keys instead of
+          // always jumping to apiKeys[1]/index 2. Advance a persistent pointer, wrapping around.
+          _keyRotation = (_keyRotation + 1) % cfg.apiKeys.length;
+          const next = cfg.apiKeys[_keyRotation];
+          const newIndex = _keyRotation + 1;
           process.env.SCX_API_KEY = next;
           view.webview.postMessage({ type: 'keySwitched', newKeyIndex: newIndex });
         } catch (e) {
           view.webview.postMessage({ type: 'error', error: 'Key switch failed: ' + (e as Error).message });
         }
+      } else if (msg.type === 'setConfig') {
+        try {
+          await vscode.workspace.getConfiguration('kritical.scxcode').update(msg.key, msg.value, vscode.ConfigurationTarget.Global);
+        } catch (e) {
+          view.webview.postMessage({ type: 'error', error: 'Setting update failed: ' + (e as Error).message });
+        }
+      } else if (msg.type === 'uploadFile') {
+        const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Attach to SCXCode' });
+        if (picked && picked[0]) {
+          try {
+            const bytes = await vscode.workspace.fs.readFile(picked[0]);
+            let content = Buffer.from(bytes).toString('utf8');
+            if (content.length > 24000) { content = content.slice(0, 24000) + '\n…(truncated)'; }
+            const name = picked[0].path.split('/').pop() || 'file';
+            this._attached += `\n\n## Attached file: ${name}\n\`\`\`\n${content}\n\`\`\`\n`;
+            view.webview.postMessage({ type: 'fileAttached', name, chars: content.length });
+          } catch (e) {
+            view.webview.postMessage({ type: 'error', error: 'File read failed: ' + (e as Error).message });
+          }
+        }
+      } else if (msg.type === 'attachRepo') {
+        const found = await vscode.workspace.findFiles('**/*.{ts,js,py,ps1,psm1,al,md,json,yaml,yml}', '**/{node_modules,out,.git,.alpackages}/**', 80);
+        const rel = found.map((f) => vscode.workspace.asRelativePath(f)).sort();
+        this._attached += `\n\n## Workspace files (${rel.length}):\n${rel.join('\n')}\n`;
+        view.webview.postMessage({ type: 'fileAttached', name: `repo (${rel.length} files)`, chars: this._attached.length });
+      } else if (msg.type === 'listMcp') {
+        view.webview.postMessage({ type: 'notice', text: mcpSummary() });
       } else if (msg.type === 'config') {
         const cfg = getConfig();
         view.webview.postMessage({
           type: 'config',
           model: cfg.defaultModel,
+          models: SCX_MODEL_CATALOG,
           keyCount: cfg.apiKeys.length,
           autoContext: cfg.autoContext,
+          maxTokens: cfg.maxTokens,
+          concurrency: cfg.concurrency,
+          temperature: cfg.temperature,
+          provider: cfg.provider,
         });
       }
     });
@@ -730,7 +954,7 @@ export function activate(context: vscode.ExtensionContext) {
   sb.show();
   context.subscriptions.push(sb);
 
-  const out = vscode.window.createOutputChannel('Kritical SCXCode');
+  const out = getOutputChannel();
   out.appendLine('Kritical SCXCode activated · ' + new Date().toISOString());
   out.appendLine('Sidebar view registered: kritical.scxcode.chat');
   out.appendLine('Run "Kritical: Test SCX Connection" from the command palette to verify auth.');

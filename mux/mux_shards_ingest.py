@@ -3,7 +3,8 @@ Usage: python mux_shards_ingest.py <shardsJson>  (JSON array of {session_id, sou
 import sys, json, hashlib, pyodbc
 
 try:
-    shards = json.load(open(sys.argv[1], encoding="utf-8"))
+    # utf-8-sig tolerates a BOM (PowerShell Set-Content -Encoding utf8 adds one on 5.1) AND plain utf-8
+    shards = json.load(open(sys.argv[1], encoding="utf-8-sig"))
     if isinstance(shards, dict):
         shards = [shards]
     cn = pyodbc.connect(
@@ -27,4 +28,5 @@ try:
     print(f"context_shard: inserted {n}/{len(shards)} (session {shards[0].get('session_id') if shards else '-'})")
     cn.close()
 except Exception as e:
-    print(f"context_shard ingest error — {e}"); sys.exit(0)
+    # fail LOUD and non-zero so the mux surfaces it instead of silently swallowing (exit 0 hid this for real)
+    print(f"context_shard INGEST FAILED — {e}"); sys.exit(1)

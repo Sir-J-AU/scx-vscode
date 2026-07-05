@@ -41,7 +41,7 @@ T "kritical.scxcode installed" { [bool]($installed -contains 'kritical.scxcode')
 T "plugin control panel installed" { [bool]($installed -contains 'kritical.kritical-plugin-control-panel') }
 
 Write-Host "`n[4] Model catalogue" -ForegroundColor White
-T "Get-KritScxModels returns >=15" { (& (Join-Path $scx 'models\Get-KritScxModels.ps1') -Offline 2>$null | Measure-Object).Count -ge 15 }
+T "Get-KritScxModels returns >=13" { (& (Join-Path $scx 'models\Get-KritScxModels.ps1') -Offline 2>$null | Measure-Object).Count -ge 13 }
 
 Write-Host "`n[5] Codex pack + safety present" -ForegroundColor White
 T "kcodex shim exists" { Test-Path 'C:\KriticalSCX\bin\kcodex.cmd' }

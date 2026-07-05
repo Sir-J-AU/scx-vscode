@@ -1,0 +1,782 @@
+[
+  {
+    "file": "codex-wrapper\\Set-KritMcp.ps1",
+    "severity": "med",
+    "line_hint": "$lines = $lines[0..$start] + \"enabled = $want\" + $lines[($start+1)..($lines.Count-1)]",
+    "description": "Array concatenation with + operator creates a new array and can cause performance issues with large files. Should use ArrayList or System.Collections.Generic.List for efficient insertion."
+  },
+  {
+    "file": "codex-wrapper\\Set-KritMcp.ps1",
+    "severity": "low",
+    "line_hint": "$bk = \"$Config.bak-$(Get-Random)\"",
+    "description": "Random backup filename could potentially collide if script runs simultaneously. Consider using timestamp or GUID for better uniqueness."
+  },
+  {
+    "file": "codex-wrapper\\kritical-codex.ps1",
+    "severity": "med",
+    "line_hint": "Lines 180-182",
+    "description": "Hardcoded API key 'sk-kritical-scx-local' exposed in source code, violating security best practices"
+  },
+  {
+    "file": "codex-wrapper\\pack\\Apply-KriticalCodexPack.ps1",
+    "severity": "med",
+    "line_hint": "$cur = [Environment]::GetEnvironmentVariable('PATH','User')",
+    "description": "Potential PATH corruption when removing binDir - doesn't handle empty PATH or trailing semicolons properly, could result in malformed PATH variable"
+  },
+  {
+    "file": "codex-wrapper\\pack\\Apply-KriticalCodexPack.ps1",
+    "severity": "low",
+    "line_hint": "$ver = if($codex){ try { (& codex --version 2>&1 | Select-Object -First 1) } catch { 'unknown' } } else { '(not found)' }",
+    "description": "Unsafe command execution - if codex command is malicious or compromised, this could execute arbitrary code"
+  },
+  {
+    "file": "codex-wrapper\\pack\\Apply-KriticalCodexPack.ps1",
+    "severity": "low",
+    "line_hint": "$proxy = try { [bool]((Get-NetTCPConnection -LocalPort 4180 -State Listen -ErrorAction Stop)) } catch { $false }",
+    "description": "Get-NetTCPConnection may not be available on all systems (Windows Server Core, older Windows versions), could cause unexpected errors"
+  },
+  {
+    "file": "codex-wrapper\\pack\\Update-Codex.ps1",
+    "severity": "med",
+    "line_hint": "npm install -g \"$pkg@$($before -replace '[^0-9\\.]','')\"",
+    "description": "Rollback version sanitization may produce invalid version strings by removing non-numeric characters, potentially causing npm install failures"
+  },
+  {
+    "file": "codex-wrapper\\pack\\Update-Codex.ps1",
+    "severity": "low",
+    "line_hint": "$before -replace '[^0-9\\.]',''",
+    "description": "Version sanitization regex may remove valid version components like pre-release tags (alpha, beta) or build metadata"
+  },
+  {
+    "file": "d365\\Publish-KritD365SalesApp.ps1",
+    "severity": "med",
+    "line_hint": "$bodyParts += [System.Text.Encoding]::UTF8.GetString($fileBytes)",
+    "description": "Binary file content incorrectly converted to UTF-8 string which may corrupt the .app file during API upload"
+  },
+  {
+    "file": "d365\\Publish-KritD365SalesApp.ps1",
+    "severity": "med",
+    "line_hint": "$body = $bodyParts -join \"\"",
+    "description": "Multipart form data construction manually concatenates strings which may cause encoding issues and boundary format errors"
+  },
+  {
+    "file": "d365\\Publish-KritD365SalesApp.ps1",
+    "severity": "low",
+    "line_hint": "$apiGatewayUrl = $targetEnv.AadTenantId",
+    "description": "Fallback to AadTenantId as API gateway URL is incorrect - AadTenantId is a GUID, not a URL"
+  },
+  {
+    "file": "install\\Export-KritScxStore.ps1",
+    "severity": "med",
+    "line_hint": "& $venvPy \"$PSScriptRoot\\store_verify.py\"",
+    "description": "Potential command injection if $venvPy or $PSScriptRoot contain malicious values, though risk is limited in this context"
+  },
+  {
+    "file": "install\\Export-KritScxStore.ps1",
+    "severity": "med",
+    "line_hint": "$rows = sqlcmd -S $Server -d $DbName -E -h -1 -W -Q \"SELECT COUNT(*) FROM dbo.$($t.tbl);\" 2>&1 | Select-Object -First 1",
+    "description": "SQL injection vulnerability if $t.tbl contains user-controlled input, though tables are hardcoded in this script"
+  },
+  {
+    "file": "install\\Export-KritScxStore.ps1",
+    "severity": "low",
+    "line_hint": "open(os.path.join(r'$dir', f'{n}_{str(k)[:24]}.$($t.ext)'),'w',encoding='utf-8').write(str(c))",
+    "description": "Potential file path traversal if key values contain malicious characters, though risk is limited by truncation to 24 chars"
+  },
+  {
+    "file": "install\\Install-KritAiCLIs.ps1",
+    "severity": "med",
+    "line_hint": "Install-OneCLI function",
+    "description": "TestCmd execution may fail if binary requires interactive input or has different version command format, causing version detection to fail"
+  },
+  {
+    "file": "install\\Install-KritAiCLIs.ps1",
+    "severity": "low",
+    "line_hint": "Find-CliBin function",
+    "description": "Hardcoded path pattern for userLocal may not match actual installation locations for all package managers, potentially missing installed binaries"
+  },
+  {
+    "file": "install\\Install-KritScxVsCode.ps1",
+    "severity": "high",
+    "line_hint": "Line 47: $SecretsDir = 'C:\\Users\\joshl\\OneDrive - Kritical Pty Ltd\\Github-SecretsOutsideOfGitRepos'",
+    "description": "Hardcoded user-specific path that will fail for any user other than 'joshl', breaking portability"
+  },
+  {
+    "file": "install\\Install-KritScxVsCode.ps1",
+    "severity": "med",
+    "line_hint": "Line 51: $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path",
+    "description": "Assumes script is located exactly one level below repo root, may fail with incorrect directory structure"
+  },
+  {
+    "file": "install\\Install-KritScxVsCode.ps1",
+    "severity": "med",
+    "line_hint": "Line 58: $files = Get-ChildItem -LiteralPath $SecretsDir -Filter 'scx-benApiKey-*.txt' -ErrorAction SilentlyContinue",
+    "description": "SilentlyContinue may mask critical errors like permission denied or invalid path"
+  },
+  {
+    "file": "install\\Install-KritScxVsCode.ps1",
+    "severity": "low",
+    "line_hint": "Line 85: $exts = & $CodeExe --list-extensions 2>$null",
+    "description": "Error stream redirected to null may hide useful diagnostic information"
+  },
+  {
+    "file": "install\\Install-KritScxVsCode.ps1",
+    "severity": "med",
+    "line_hint": "Line 119: $codeExe = $c; break",
+    "description": "Uses hardcoded Windows paths that won't work on macOS/Linux, limiting cross-platform compatibility"
+  },
+  {
+    "file": "install\\Install-KriticalSCX.ps1",
+    "severity": "high",
+    "line_hint": "irm https://kritical.au/scx/install.ps1 | iex",
+    "description": "Remote script execution without validation exposes to MITM attacks and arbitrary code execution"
+  },
+  {
+    "file": "install\\Install-KriticalSCX.ps1",
+    "severity": "med",
+    "line_hint": "$ErrorActionPreference='Continue'",
+    "description": "Continuing on errors may mask critical failures during installation process"
+  },
+  {
+    "file": "install\\Install-KriticalSCX.ps1",
+    "severity": "med",
+    "line_hint": "& $pack -Mode Install | Out-Null",
+    "description": "Suppressing output from external scripts hides potential errors and debugging information"
+  },
+  {
+    "file": "install\\Install-KriticalSCX.ps1",
+    "severity": "low",
+    "line_hint": "$RepoRoot default path",
+    "description": "Hardcoded user-specific path may not exist on other systems, causing failures"
+  },
+  {
+    "file": "install\\Install-KriticalSCXStore.ps1",
+    "severity": "med",
+    "line_hint": "sqlcmd -S $Server -d $database -E -b -h -1 -W -Q $q 2>&1",
+    "description": "Potential SQL injection vulnerability - $q parameter is passed directly to sqlcmd without sanitization"
+  },
+  {
+    "file": "install\\Install-KriticalSCXStore.ps1",
+    "severity": "med",
+    "line_hint": "$schema = @\"...\"@",
+    "description": "Database name ($DbName) is directly interpolated into SQL schema without proper escaping, creating SQL injection risk"
+  },
+  {
+    "file": "install\\Install-KriticalSCXStore.ps1",
+    "severity": "low",
+    "line_hint": "sqlcmd -S $Server -E -b -i $tmp 2>&1 | Out-Host",
+    "description": "Temporary file creation and execution may fail if path contains special characters or if file permissions are restrictive"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensFull.ps1",
+    "severity": "high",
+    "line_hint": "$GH = \"C:\\Users\\joshl\\OneDrive - Kritical Pty Ltd\\Github\"",
+    "description": "Hardcoded absolute path with specific username makes script non-portable and will fail for other users"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensFull.ps1",
+    "severity": "med",
+    "line_hint": "$venvPy = 'C:\\KriticalSCX\\venv-litellm-test\\Scripts\\python.exe'",
+    "description": "Hardcoded Python executable path makes script non-portable and dependent on specific environment setup"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensFull.ps1",
+    "severity": "med",
+    "line_hint": "sqlcmd -S $Server -d $DbName -E -b -Q $schema 2>&1 | Out-Null",
+    "description": "Silencing sqlcmd errors could hide critical database connection or schema creation failures"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensFull.ps1",
+    "severity": "low",
+    "line_hint": "$out = \"$env:TEMP\\lens-$($t.n)-$(Get-Date -Format yyyyMMddHHmmss).json\"",
+    "description": "Potential race condition if multiple instances run simultaneously with same timestamp"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensIngest.ps1",
+    "severity": "high",
+    "line_hint": "$Root path",
+    "description": "Hardcoded absolute path contains user-specific directory (C:\\Users\\joshl\\OneDrive - Kritical Pty Ltd\\Github\\Kritical.SCXCode) which will fail for other users"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensIngest.ps1",
+    "severity": "high",
+    "line_hint": "$miner path",
+    "description": "Hardcoded absolute path to module contains user-specific directory that will fail for other users"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensIngest.ps1",
+    "severity": "med",
+    "line_hint": "sqlcmd execution",
+    "description": "Direct execution of sqlcmd without proper error handling - potential SQL injection if $Table contains malicious content"
+  },
+  {
+    "file": "install\\Invoke-KritScxLensIngest.ps1",
+    "severity": "low",
+    "line_hint": "Temporary file path",
+    "description": "Temporary file creation without cleanup - potential accumulation of files in temp directory"
+  },
+  {
+    "file": "install\\Save-KritScxSourcesRecursively.ps1",
+    "severity": "med",
+    "line_hint": "$archive = Join-Path (Split-Path -Parent $OutputRoot) (\"_ARCHIVED-sources-\" + (Get-Date -Format 'yyyyMMdd-HHmmss'))",
+    "description": "Potential path collision if OutputRoot is at filesystem root (Split-Path -Parent returns $null), causing Join-Path failure."
+  },
+  {
+    "file": "install\\Save-KritScxSourcesRecursively.ps1",
+    "severity": "low",
+    "line_hint": "$path = $path -replace '/','__' -replace '[^a-zA-Z0-9_.-]','-'",
+    "description": "Filename sanitization may produce duplicate filenames for different URLs (e.g., 'a/b' and 'a__b' both become 'a__b.md'), causing overwrites."
+  },
+  {
+    "file": "install\\Save-KritScxSourcesRecursively.ps1",
+    "severity": "med",
+    "line_hint": "$page = Get-PageViaHttp -Url $url",
+    "description": "No timeout or retry mechanism for HTTP requests; transient network failures may prematurely halt crawling without recovery attempt."
+  },
+  {
+    "file": "install\\lens_ingest.py",
+    "severity": "med",
+    "line_hint": "open(path, \"r\", encoding=\"utf-8\", errors=\"replace\").read()",
+    "description": "File handle not explicitly closed, potential resource leak"
+  },
+  {
+    "file": "install\\lens_ingest.py",
+    "severity": "med",
+    "line_hint": "cn.close()",
+    "description": "Database connection not closed in exception path, potential resource leak"
+  },
+  {
+    "file": "install\\lens_ingest.py",
+    "severity": "low",
+    "line_hint": "sys.exit(0)",
+    "description": "Exiting with code 0 on error, should use non-zero exit code for failures"
+  },
+  {
+    "file": "install\\store_verify.py",
+    "severity": "med",
+    "line_hint": "content.encode(\"utf-8\", \"replace\")",
+    "description": "Using 'replace' error handling may mask encoding issues and produce different content than original, leading to false hash mismatches"
+  },
+  {
+    "file": "install\\store_verify.py",
+    "severity": "med",
+    "line_hint": "CAST(DECOMPRESS({col}) AS NVARCHAR(MAX))",
+    "description": "NVARCHAR conversion may alter content encoding/format compared to original UTF-8 bytes used for hashing during ingest"
+  },
+  {
+    "file": "lens\\Invoke-KritLensBrainBugHunt.py",
+    "severity": "high",
+    "line_hint": "src = open(target, encoding=\"utf-8-sig\").read()",
+    "description": "File handle not closed properly, potential resource leak"
+  },
+  {
+    "file": "lens\\Invoke-KritLensBrainBugHunt.py",
+    "severity": "high",
+    "line_hint": "req = urllib.request.Request(PROXY, data=body, headers={\"Authorization\": f\"Bearer {KEY}\", \"Content-Type\": \"application/json\"})",
+    "description": "Hardcoded API key 'sk-kritical-scx-local' in source code"
+  },
+  {
+    "file": "lens\\Invoke-KritLensBrainBugHunt.py",
+    "severity": "med",
+    "line_hint": "if 2 <= len(body) <= 400:",
+    "description": "Arbitrary line count limits may exclude valid functions or include incomplete ones"
+  },
+  {
+    "file": "lens\\Invoke-KritLensBrainBugHunt.py",
+    "severity": "med",
+    "line_hint": "parsed = json.loads(mjson.group(0)) if mjson else {\"purpose\":\"(unparseable)\",\"identifiers_used\":[],\"bugs\":[],\"concerns\":[\"model returned non-JSON\"]}",
+    "description": "No error handling for JSON parsing failures from regex extraction"
+  },
+  {
+    "file": "lens\\Invoke-KritLensBrainBugHunt.py",
+    "severity": "low",
+    "line_hint": "IDENT = re.compile(r\"[A-Za-z_$][A-Za-z0-9_$]*\")",
+    "description": "Regex may match TypeScript keywords and non-identifiers like 'function' or 'return'"
+  },
+  {
+    "file": "lens\\Invoke-KritLensRepoSweep.py",
+    "severity": "high",
+    "line_hint": "PROXY = \"http://127.0.0.1:4180/v1/chat/completions\"; KEY = \"sk-kritical-scx-local\"",
+    "description": "Hardcoded API key in source code (SCX-only violation)"
+  },
+  {
+    "file": "lens\\Invoke-KritLensRepoSweep.py",
+    "severity": "high",
+    "line_hint": "with urllib.request.urlopen(req, timeout=180) as r:",
+    "description": "No timeout handling for HTTP requests - script may hang indefinitely on network issues"
+  },
+  {
+    "file": "lens\\Invoke-KritLensRepoSweep.py",
+    "severity": "med",
+    "line_hint": "open(path, encoding=\"utf-8-sig\", errors=\"replace\").read()",
+    "description": "File handle not explicitly closed - potential resource leak with many files"
+  },
+  {
+    "file": "lens\\Invoke-KritLensRepoSweep.py",
+    "severity": "med",
+    "line_hint": "cn = pyodbc.connect(CONN, timeout=20); cur = cn.cursor()",
+    "description": "Database connection and cursor not closed in exception paths - resource leak risk"
+  },
+  {
+    "file": "lens\\Invoke-KritLensRepoSweep.py",
+    "severity": "low",
+    "line_hint": "parsed = json.loads(m.group(0))",
+    "description": "No validation of extracted JSON before loading - potential crash on malformed responses"
+  },
+  {
+    "file": "litellm\\Install-KritScxLiteLLM.ps1",
+    "severity": "med",
+    "line_hint": "Start-Process with litellm command",
+    "description": "Process started without proper error handling - if litellm fails to start or crashes immediately, the script will still create a PID file and claim success after health checks timeout"
+  },
+  {
+    "file": "litellm\\Install-KritScxLiteLLM.ps1",
+    "severity": "med",
+    "line_hint": "& $PSCommandPath -Mode Install",
+    "description": "Recursive call in Heal mode could potentially cause infinite recursion if health check continues to fail"
+  },
+  {
+    "file": "litellm\\Install-KritScxLiteLLM.ps1",
+    "severity": "low",
+    "line_hint": "Get-Content -LiteralPath $pidFile -Raw",
+    "description": "No validation that PID file contains a valid integer before casting to [int], could cause exceptions"
+  },
+  {
+    "file": "litellm\\Install-KritScxLiteLLM.ps1",
+    "severity": "low",
+    "line_hint": "$env:PATH += \";$userScripts\"",
+    "description": "Temporary PATH modification may not be reliable as environment variable changes don't affect parent processes"
+  },
+  {
+    "file": "litellm\\Manage-KritScxProxy.ps1",
+    "severity": "med",
+    "line_hint": "$ldir = 'C:\\Users\\joshl\\OneDrive - Kritical Pty Ltd\\Github\\Kritical.SCXCode\\litellm'",
+    "description": "Hardcoded user-specific path that will fail for other users - should use environment variable or configurable path"
+  },
+  {
+    "file": "litellm\\Manage-KritScxProxy.ps1",
+    "severity": "med",
+    "line_hint": "$venvPy = 'C:\\KriticalSCX\\venv-litellm-test\\Scripts\\python.exe'",
+    "description": "Hardcoded absolute paths that may not exist on target systems - should be configurable or use relative paths"
+  },
+  {
+    "file": "litellm\\Manage-KritScxProxy.ps1",
+    "severity": "low",
+    "line_hint": "for ($i=0; $i -lt 20 -and -not (Test-Health); $i++) { Start-Sleep 2 }",
+    "description": "No timeout handling or error reporting if service fails to start within 40 seconds - should provide better feedback"
+  },
+  {
+    "file": "litellm\\Manage-KritScxProxy.ps1",
+    "severity": "low",
+    "line_hint": "$allowTrad = ([Environment]::GetEnvironmentVariable('KRIT_SCX_ALLOW_TRADITIONAL_KEYS','User') -eq '1') -or ($env:KRIT_SCX_ALLOW_TRADITIONAL_KEYS -eq '1')",
+    "description": "Environment variable check could be simplified using a single method with fallback"
+  },
+  {
+    "file": "litellm\\Test-KritScxRouting.ps1",
+    "severity": "med",
+    "line_hint": "$env:ANTHROPIC_BASE_URL",
+    "description": "Environment variable check uses $env:ANTHROPIC_BASE_URL instead of [Environment]::GetEnvironmentVariable for consistency, potentially missing user-scoped variables"
+  },
+  {
+    "file": "litellm\\Test-KritScxRouting.ps1",
+    "severity": "low",
+    "line_hint": "$auth = \"$env:USERPROFILE\\.codex\\auth.json\"",
+    "description": "Hardcoded Windows path separator may cause issues on non-Windows systems if script runs cross-platform"
+  },
+  {
+    "file": "litellm\\kritical_scx_logger.py",
+    "severity": "med",
+    "line_hint": "_CONN = os.environ.get(...",
+    "description": "Hardcoded SQL Server connection string with default local server and no encryption (Encrypt=no) poses security risk if environment variable is not set"
+  },
+  {
+    "file": "litellm\\kritical_scx_logger.py",
+    "severity": "low",
+    "line_hint": "_dbg(msg):",
+    "description": "Hardcoded Windows path (C:\\KriticalSCX\\callback-debug.log) will fail on non-Windows systems and requires specific directory permissions"
+  },
+  {
+    "file": "litellm\\kritical_scx_logger.py",
+    "severity": "med",
+    "line_hint": "_write(rows):",
+    "description": "Database connection is opened and closed for every batch of rows instead of using connection pooling, which could cause performance issues under load"
+  },
+  {
+    "file": "models\\Get-KritScxModels.ps1",
+    "severity": "med",
+    "line_hint": "$scxKey = [Environment]::GetEnvironmentVariable('SCX_API_KEY','User')",
+    "description": "Environment variable retrieval only checks User scope, missing Machine and Process scopes which may contain the key"
+  },
+  {
+    "file": "models\\Get-KritScxModels.ps1",
+    "severity": "low",
+    "line_hint": "$cacheFresh = $cache -and ((New-TimeSpan -Start ([datetime]$cache.updated) -End (Get-Date)).TotalHours -lt $MaxAgeHrs)",
+    "description": "Potential timezone parsing issue with ISO 8601 format; cache.updated may not parse correctly in all locales"
+  },
+  {
+    "file": "models\\Get-KritScxModels.ps1",
+    "severity": "low",
+    "line_hint": "$proxyHealthy = try { (Invoke-WebRequest ...).StatusCode -eq 200 } catch { $false }",
+    "description": "Missing -ErrorAction Stop in Invoke-WebRequest call; non-terminating errors might not be caught"
+  },
+  {
+    "file": "mux\\Invoke-KritScxComplete.ps1",
+    "severity": "med",
+    "line_hint": "$r = Invoke-RestMethod $Base -Method Post -TimeoutSec 180 -Headers @{ Authorization=\"Bearer $Key\" } -ContentType 'application/json' -Body $body",
+    "description": "No error handling for HTTP failures - script will crash on non-200 responses without meaningful error context"
+  },
+  {
+    "file": "mux\\Invoke-KritScxComplete.ps1",
+    "severity": "low",
+    "line_hint": "$Key='sk-kritical-scx-local'",
+    "description": "Hardcoded API key in source code - should be parameterized or retrieved from secure storage"
+  },
+  {
+    "file": "mux\\Invoke-KritScxMux.ps1",
+    "severity": "med",
+    "line_hint": "$items = @($Shards | ForEach-Object { if (Test-Path $_ -PathType Leaf) { [pscustomobject]@{ ref=(Split-Path $_ -Leaf); text=(Get-Content $_ -Raw) } } else { [pscustomobject]@{ ref='inline'; text=$_ } } })",
+    "description": "Potential file path injection if shards contain malicious paths; Test-Path should validate paths more strictly"
+  },
+  {
+    "file": "mux\\Invoke-KritScxMux.ps1",
+    "severity": "low",
+    "line_hint": "$body = @{ model=$m; max_tokens=220; temperature=0; messages=@(@{role='user';content=\"Task: $t`n`nSummarise the SOURCE below for that task in <=100 words; keep concrete facts/names. SOURCE:`n`n$($it.text)\"}) } | ConvertTo-Json -Depth 6",
+    "description": "No input sanitization for $it.text which could contain special characters that break JSON formatting"
+  },
+  {
+    "file": "mux\\Invoke-KritScxMux.ps1",
+    "severity": "med",
+    "line_hint": "$tmp=\"$env:TEMP\\mux-shards-$(Get-Random).json\"",
+    "description": "Temporary file creation with Get-Random is not cryptographically secure and could be predictable"
+  },
+  {
+    "file": "mux\\Invoke-KritScxMux.ps1",
+    "severity": "low",
+    "line_hint": "$ingestOut = & $venvPy \"$PSScriptRoot\\mux_shards_ingest.py\" $tmp 2>&1",
+    "description": "No validation that $tmp file exists before passing to Python script, could cause script failure"
+  },
+  {
+    "file": "mux\\mux_shards_ingest.py",
+    "severity": "med",
+    "line_hint": "open(sys.argv[1], encoding=\"utf-8-sig\")",
+    "description": "File handle not explicitly closed, potential resource leak"
+  },
+  {
+    "file": "mux\\mux_shards_ingest.py",
+    "severity": "med",
+    "line_hint": "s.get(\"content\") or \"\"",
+    "description": "Potential SQL injection if content contains malicious SQL code when cast to NVARCHAR"
+  },
+  {
+    "file": "mux\\mux_shards_ingest.py",
+    "severity": "low",
+    "line_hint": "cn.close()",
+    "description": "Database connection close not in finally block, may not execute on exception"
+  },
+  {
+    "file": "ps-module\\KritOneDrive.psm1",
+    "severity": "high",
+    "line_hint": "Suspend-KritOneDrive: Force flag ignored \u2013 both branches call Stop-Process -Force",
+    "description": "The $Force switch is intended to control whether OneDrive is force\u2011killed after the graceful shutdown timeout, but the code calls Stop-Process -Force in both the if and else blocks, making the switch ineffective and potentially killing OneDrive even when the user only wanted a graceful stop."
+  },
+  {
+    "file": "ps-module\\KritOneDrive.psm1",
+    "severity": "medium",
+    "line_hint": "Suspend-KritOneDrive: & (Get-KritOneDriveExe) /shutdown without null check",
+    "description": "If Get\u2011KritOneDriveExe cannot locate OneDrive.exe it returns $null; invoking '& $null /shutdown' throws a terminating error, causing the function to fail unexpectedly instead of handling the missing executable gracefully."
+  },
+  {
+    "file": "ps-module\\KritSsh.psm1",
+    "severity": "high",
+    "line_hint": "function New-KritSshKey { ... ssh-keygen -t ed25519 -f $Key -N '\"\"' -C $Comment ... }",
+    "description": "The -N argument is passed as the literal string \"\\\"\\\"\", which sets a non\u2011empty passphrase of two double\u2011quote characters instead of an empty passphrase. This prevents the key from being used without a password and can cause authentication failures."
+  },
+  {
+    "file": "ps-module\\KritSsh.psm1",
+    "severity": "med",
+    "line_hint": "function New-KritSshKey { ... ssh-keygen ... ; Write-Host \"Generated $Key\"; return (Get-Content $Pub -Raw) }",
+    "description": "The function returns the public key unconditionally after invoking ssh-keygen, but does not verify that $Pub was actually created. If key generation fails (e.g., ssh-keygen not found or error), Get-Content throws a terminating error, crashing the caller."
+  },
+  {
+    "file": "ps-module\\KritSsh.psm1",
+    "severity": "low",
+    "line_hint": "function Set-KritSshGitHub { ... ssh-keyscan github.com 2>$null | Add-Content $kh }",
+    "description": "The code assumes ssh-keyscan is present and succeeds. If ssh-keyscan is missing or fails, nothing is added to known_hosts, leading to later SSH connections failing with host\u2011key verification errors. No error handling or fallback is provided."
+  },
+  {
+    "file": "ps-module\\KritSsh.psm1",
+    "severity": "low",
+    "line_hint": "function Remove-KritSshKey { ... gh api -X DELETE \"user/keys/$id\" ... }",
+    "description": "The GitHub key ID ($id) is taken directly from the API response without validation. If the API returns an unexpected value (e.g., null, non\u2011numeric string), the DELETE request may be malformed or inadvertently target a wrong resource."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "high",
+    "line_hint": "function Invoke-KritScxAutoContinue",
+    "description": "The function never emits or returns any result (no Write\u2011Output, return statement, or PassThru handling), so callers always receive $null and the documented HR27 logging, SessionId, Wave, and NoLog switches are never exercised."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "med",
+    "line_hint": "function Invoke-KritScxAutoContinue",
+    "description": "Several parameters ($PassThru, $NoLog, $Wave, $SessionId) are parsed but never used, leading to silent failures and confusing API surface."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "med",
+    "line_hint": "function Invoke-KritScxAutoContinue",
+    "description": "A Stopwatch is started and stopped but its elapsed time is never reported or logged, wasting resources."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "low",
+    "line_hint": "function Invoke-KritScxSingleTurn",
+    "description": "Calls the base\u2011module command via '& $mainMod @params'; if $mainMod is a CommandInfo object this may fail\u2014using the command name or scriptblock is safer."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "low",
+    "line_hint": "function Invoke-KritScxSingleTurn",
+    "description": "HTTP header key 'content-type' is lower\u2011cased; while PowerShell tolerates it, the canonical header name is 'Content-Type'."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "low",
+    "line_hint": "function Test-KritScxNaturalTerminator",
+    "description": "Token approximation uses $Chunk.Length instead of the trimmed string, slightly over\u2011estimating token count for trailing whitespace."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "low",
+    "line_hint": "function Show-KriticalSCXCodeBanner",
+    "description": "Banner loading trusts user\u2011controlled OneDrive paths without validation, opening a potential path\u2011injection or information\u2011leak vector if environment variables are manipulated."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.AutoContinue.psm1",
+    "severity": "low",
+    "line_hint": "function Remove-KritScxDuplicateParagraphs",
+    "description": "Repeatedly attempts to Import\u2011Module from a relative path on each call, which can cause unnecessary module reloads and performance overhead."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.psm1",
+    "severity": "high",
+    "line_hint": "New-KritScxEmbedding function definition (ends abruptly)",
+    "description": "The New-KritScxEmbedding function is incomplete: the Invoke-RestMethod call lacks required -Headers and -Body arguments, the function never returns a value, and the closing brace for the function is missing, causing a syntax error that prevents the module from loading."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.psm1",
+    "severity": "medium",
+    "line_hint": "Switch-KritScxKey function, line with $currentKey.Substring(0, 8)",
+    "description": "If no SCX_API_KEY is set in HKCU, $currentKey is $null; calling .Substring on $null throws a NullReferenceException, breaking key\u2011switching and any caller that invokes this function without a pre\u2011existing key."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.psm1",
+    "severity": "low",
+    "line_hint": "Switch-KritScxKey default parameter $SecretsDir",
+    "description": "The default SecretsDir path is hard\u2011coded to a specific user\u2019s OneDrive location, leaking internal directory structure and making the function unusable on other machines unless overridden."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.psm1",
+    "severity": "low",
+    "line_hint": "Invoke-KritScx catch block (StreamReader)",
+    "description": "The response stream is read via a StreamReader without disposing it, potentially leaking file handles under high error volume."
+  },
+  {
+    "file": "ps-module\\Kritical.PS.SCXCode.psm1",
+    "severity": "low",
+    "line_hint": "Invoke-KritScxChat error handling ($lastErr.IsRateLimit)",
+    "description": "When an exception does not contain a TargetObject (e.g., network timeout), $lastErr is $null; accessing .IsRateLimit on $null is safe in PowerShell but makes the logic ambiguous and could mask unexpected errors."
+  },
+  {
+    "file": "ps-module\\KriticalDecisionLogger.psm1",
+    "severity": "high",
+    "line_hint": "Get-KriticalLoggerJsonlPath / Get-KriticalLoggerCounterPath",
+    "description": "Category name is interpolated directly into a file path without sanitisation, allowing path\u2011traversal (e.g. \"..\\\\..\\\\secret\") to write outside the intended documentation folder."
+  },
+  {
+    "file": "ps-module\\KriticalDecisionLogger.psm1",
+    "severity": "high",
+    "line_hint": "Write-KriticalDecisionRow (not fully shown)",
+    "description": "If the function later builds SQL statements using the $Model, $Provider, $Content or other user\u2011supplied strings without proper parameterisation, it creates a SQL injection surface for the optional EmitToDb path."
+  },
+  {
+    "file": "ps-module\\KriticalDecisionLogger.psm1",
+    "severity": "med",
+    "line_hint": "Test-KriticalExistingSha",
+    "description": "Reads entire JSONL files into memory with Get\u2011Content -Raw for each search, which can cause out\u2011of\u2011memory crashes on large log files."
+  },
+  {
+    "file": "ps-module\\KriticalDecisionLogger.psm1",
+    "severity": "med",
+    "line_hint": "Resolve-KriticalLoggerRoot",
+    "description": "When $env:KRITICAL_DECISION_LOG_ROOT is set to a non\u2011existent path the function silently falls back to directory walking, potentially hiding misconfiguration and making debugging harder."
+  },
+  {
+    "file": "ps-module\\KriticalDecisionLogger.psm1",
+    "severity": "low",
+    "line_hint": "Update-KriticalDupeCounter",
+    "description": "Initial duplicate count is set to 2 (original + duplicate) even if the original entry was never logged in the current counter file, leading to an inaccurate count for the first duplicate."
+  },
+  {
+    "file": "ps-module\\KriticalDecisionLogger.psm1",
+    "severity": "low",
+    "line_hint": "Get-KriticalContentSimHash",
+    "description": "Uses MD5 for token hashing, which is cryptographically broken; while acceptable for SimHash, it may raise security\u2011review concerns."
+  },
+  {
+    "file": "src\\extension.ts",
+    "severity": "high",
+    "line_hint": "_keyRotation variable and key rotation logic",
+    "description": "The _keyRotation variable is defined but never used; scxPost always uses the primary API key, ignoring the list of rotated keys (apiKeys) and thus breaking the intended key rotation and fallback mechanism."
+  },
+  {
+    "file": "src\\extension.ts",
+    "severity": "medium",
+    "line_hint": "resolveClaudeCliPath function",
+    "description": "Path detection treats any string containing '/' or '\\' as a path and only checks existence; relative paths like 'bin/claude' will be considered a path, and if they don't exist the function falls back to Windows candidate search, potentially returning an incorrect executable path and causing spawn failures."
+  },
+  {
+    "file": "src\\extension.ts",
+    "severity": "medium",
+    "line_hint": "getConfig primary key replacement",
+    "description": "The replacement only matches the exact string '${env:SCX_API_KEY}'. If the configuration default includes whitespace or a different env variable syntax, the environment variable will not be substituted, resulting in an empty API key and runtime errors."
+  },
+  {
+    "file": "src\\extension.ts",
+    "severity": "low",
+    "line_hint": "mcpSummary cfgPath construction",
+    "description": "If both USERPROFILE and HOME are undefined, cfgPath becomes '.codex/config.toml' relative to the current working directory, which may unintentionally read a file from an unexpected location."
+  },
+  {
+    "file": "store-mcp\\kritical_store_mcp.py",
+    "severity": "low",
+    "line_hint": "run_readonly_sql",
+    "description": "Read\u2011only validation may falsely reject legitimate SELECT statements that contain forbidden keywords inside string literals (e.g., SELECT 'insert') because it scans the whole lowered query for substrings like \" insert \". This can cause unnecessary refusals."
+  },
+  {
+    "file": "store-mcp\\kritical_store_mcp.py",
+    "severity": "low",
+    "line_hint": "lens_catalog",
+    "description": "The SQL constructed for the Lens catalog uses an IF \u2026 SELECT \u2026 ELSE SELECT \u2026 pattern that may be syntactically invalid on some SQL Server configurations, causing a runtime error when the tool is invoked."
+  },
+  {
+    "file": "store-mcp\\kritical_store_mcp.py",
+    "severity": "low",
+    "line_hint": "run_readonly_sql",
+    "description": "Error messages from caught exceptions are returned directly to the caller, potentially leaking internal exception details or stack traces."
+  },
+  {
+    "file": "tests\\Invoke-KritScxSelfTest.ps1",
+    "severity": "high",
+    "line_hint": "$c=$m.stacks.core.ToLower()",
+    "description": "Calls .ToLower() on $m.stacks.core which is an array; PowerShell throws a MethodNotFound error, aborting the test suite."
+  },
+  {
+    "file": "tests\\Invoke-KritScxSelfTest.ps1",
+    "severity": "low",
+    "line_hint": "-Headers @{Authorization='Bearer sk-kritical-scx-local'}",
+    "description": "Hard\u2011coded bearer token is a secret that should not be embedded in source code."
+  },
+  {
+    "file": "tests\\Invoke-KritScxSelfTest.ps1",
+    "severity": "low",
+    "line_hint": "Select-String -Path (Join-Path $scx 'codex-wrapper\\kritical-codex.ps1') -Pattern \"Model = 'openai/gpt-5-codex'\" -Quiet",
+    "description": "Select\u2011String is invoked without verifying the file exists; if the wrapper file is missing the cmdlet throws a terminating error, breaking the script."
+  },
+  {
+    "file": "tests\\Invoke-KritScxSelfTest.ps1",
+    "severity": "low",
+    "line_hint": "$j=Get-Content \"$env:USERPROFILE\\.codex\\auth.json\" -Raw|ConvertFrom-Json",
+    "description": "Assumes the auth.json file exists; if it is absent Get-Content raises a non\u2011terminating error that later dereferences $j, potentially causing a null\u2011reference failure."
+  },
+  {
+    "file": "tests\\Test-KritScxAutoContinue.ps1",
+    "severity": "high",
+    "line_hint": "$filler = $sentence * 500",
+    "description": "The '*' operator on a string produces an array of repeated strings, not a concatenated string. Passing this array to Test\u2011KritScxNaturalTerminator (which expects a single string) can cause type\u2011conversion errors or unintended truthy evaluation, leading to test failures or runtime exceptions."
+  },
+  {
+    "file": "tests\\Test-KritScxAutoContinue.ps1",
+    "severity": "low",
+    "line_hint": "(Get-Module 'Kritical.PS.SCXCode.AutoContinue').SessionState.PSVariable.Set('KriticalSCXCodeBannerEmitted', $false)",
+    "description": "The test manipulates an internal module variable to reset banner state. This creates a brittle dependency on the module's implementation detail; if the variable name changes or is removed, the test will break even though the module functionality is correct."
+  },
+  {
+    "file": "tests\\Test-KritScxMux.ps1",
+    "severity": "medium",
+    "line_hint": "9",
+    "description": "The script calls [System.Management.Automation.Language.Parser]::ParseFile on $mux without first verifying that the file exists; if the path is wrong or the file is missing, ParseFile throws an exception and the script crashes"
+  },
+  {
+    "file": "tests\\Test-KritScxMux.ps1",
+    "severity": "medium",
+    "line_hint": "18-20",
+    "description": "Session ID ($sess) is interpolated directly into raw SQL strings passed to sqlcmd, creating a SQL\u2011injection surface; although $sess is generated internally, best practice is to use parameterised queries or escape the value"
+  },
+  {
+    "file": "tests\\Test-KritScxMux.ps1",
+    "severity": "low",
+    "line_hint": "19",
+    "description": "Row\u2011count verification uses a regex match '-match \"2\"' which will also succeed for values like \"12\" or \"20\", potentially yielding false\u2011positive test results"
+  },
+  {
+    "file": "tests\\Test-KritScxMux.ps1",
+    "severity": "low",
+    "line_hint": "24",
+    "description": "The script exits with 'exit $fail'; if more than 255 failures occur the exit code is truncated on Windows, which could misreport the actual failure count"
+  },
+  {
+    "file": "tests\\Test-KritScxStoreFidelity.ps1",
+    "severity": "high",
+    "line_hint": "$line = ($out | Select-String 'TOTAL FIDELITY').ToString()",
+    "description": "If Select-String finds no match it returns $null; calling .ToString() on $null throws a terminating error, causing the script to crash instead of reporting a FAIL."
+  },
+  {
+    "file": "tests\\Test-KritScxStoreFidelity.ps1",
+    "severity": "low",
+    "line_hint": "$venvPy='C:\\KriticalSCX\\venv-litellm-test\\Scripts\\python.exe'",
+    "description": "Hard\u2011coded absolute path to the Python interpreter makes the script non\u2011portable and will fail on systems where the virtual\u2011env is located elsewhere."
+  },
+  {
+    "file": "tests\\Test-KritSupervisorRouting.ps1",
+    "severity": "high",
+    "line_hint": "exit $fail",
+    "description": "The script increments $script:fail inside function T but later reports and exits using $fail, which is never updated, causing the script to always report 0 failures and exit with code 0 even when tests fail."
+  },
+  {
+    "file": "tests\\Test-KritSupervisorRouting.ps1",
+    "severity": "high",
+    "line_hint": "Write-Host \"===== $pass passed, $fail failed =====\"",
+    "description": "Pass/fail counters displayed use $pass and $fail variables that are never modified (the function updates $script:pass/$script:fail), so the summary always shows 0/0 regardless of actual results."
+  },
+  {
+    "file": "tests\\Test-KritSupervisorRouting.ps1",
+    "severity": "medium",
+    "line_hint": "$ErrorActionPreference = 'Continue'",
+    "description": "Setting $ErrorActionPreference to 'Continue' suppresses terminating errors, allowing the script to proceed after failures and potentially masking problems; 'Stop' would be safer for a test harness."
+  },
+  {
+    "file": "tests\\Test-KritSupervisorRouting.ps1",
+    "severity": "low",
+    "line_hint": "-Headers @{ Authorization='Bearer sk-kritical-scx-local' }",
+    "description": "A bearer token is hard\u2011coded in the script, exposing a secret value in source control."
+  },
+  {
+    "file": "tests\\Test-KriticalDecisionLogger.ps1",
+    "severity": "high",
+    "line_hint": "$env:KRITICAL_DECISION_LOG_ROOT = $sandbox ... Remove-Item Env:KRITICAL_DECISION_LOG_ROOT",
+    "description": "The script overwrites the KRITICAL_DECISION_LOG_ROOT environment variable without preserving its original value; on teardown it simply removes the variable, permanently discarding any pre\u2011existing setting in the host session."
+  },
+  {
+    "file": "tests\\Test-KriticalDecisionLogger.ps1",
+    "severity": "medium",
+    "line_hint": "Assert-Gate -Name 'G2 Add-KriticalHumanPrompt writes JSONL row' ... (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')",
+    "description": "The test builds the expected file path using UTC date while the module may store files using the local date (or a different format). This mismatch can cause intermittent false\u2011negative failures, especially around midnight UTC."
+  },
+  {
+    "file": "tests\\Test-KriticalDecisionLogger.ps1",
+    "severity": "low",
+    "line_hint": "$env:KRITICAL_LOGGER_TARGET = ''  # explicit \u2014 file only",
+    "description": "An empty KRITICAL_LOGGER_TARGET environment variable is left in the environment after the script finishes; it is not cleared in the teardown, potentially influencing subsequent PowerShell processes that rely on this variable."
+  }
+]

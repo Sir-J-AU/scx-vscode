@@ -1,0 +1,121 @@
+[
+  {
+    "function": "getConfig",
+    "loc": "35-65",
+    "severity": "high",
+    "line_hint": "Line 39: const primary = c.get<string>('apiKey', '').replace(...)",
+    "description": "The regex pattern /^\\$\\{env:SCX_API_KEY\\}$/ only matches the exact string '${env:SCX_API_KEY}', but if the user has a different value (including empty string), the substitution won't occur, potentially leaving the API key as the literal environment variable reference instead of the actual value."
+  },
+  {
+    "function": "getConfig",
+    "loc": "35-65",
+    "severity": "med",
+    "line_hint": "Line 44: if (k && !keys.includes(k)) keys.push(k);",
+    "description": "Potential duplicate key handling issue: if process.env.SCX_API_KEY matches one of the SCX_API_KEY_2..9 values, it will be added twice (once as primary, once in the loop) unless the values are identical strings, but the check only prevents exact duplicates within the secondary keys array, not against primary."
+  },
+  {
+    "function": "askClaudeCodeCli",
+    "loc": "96-132",
+    "severity": "med",
+    "line_hint": "const quotedCmd = useShell ? ... : '';",
+    "description": "On non-Windows platforms, quotedCmd is set to empty string instead of remaining unquoted args array, causing spawn failure when useShell is false."
+  },
+  {
+    "function": "scxPost",
+    "loc": "183-217",
+    "severity": "high",
+    "line_hint": "req.write(JSON.stringify(body))",
+    "description": "The request body is written without setting the 'Content-Length' header, which may cause issues with some servers or lead to incomplete requests."
+  },
+  {
+    "function": "scxPost",
+    "loc": "183-217",
+    "severity": "med",
+    "line_hint": "res.on('end', ...)",
+    "description": "No handling for incomplete responses or chunked encoding errors; assumes all data is received correctly without checking for response errors mid-stream."
+  },
+  {
+    "function": "scxPost",
+    "loc": "183-217",
+    "severity": "low",
+    "line_hint": "const url = new URL('/v1/messages', baseUrl)",
+    "description": "The URL path '/v1/messages' might be incorrect or inconsistent with the expected API endpoint; should verify against the actual SCX API documentation."
+  },
+  {
+    "function": "scxPostWithFailover",
+    "loc": "230-304",
+    "severity": "med",
+    "line_hint": "line 247 (usage: { input_tokens: 0, output_tokens: 0 })",
+    "description": "Hardcoded zero token counts for Claude CLI responses may break functionality that depends on accurate token usage tracking."
+  },
+  {
+    "function": "scxPostWithFailover",
+    "loc": "230-304",
+    "severity": "low",
+    "line_hint": "line 255 (const modelChain = [cfg.defaultModel, ...cfg.fallbackChain.filter((m) => m !== cfg.defaultModel)])",
+    "description": "Potential duplicate models in chain if defaultModel appears in fallbackChain, though filter prevents immediate issues."
+  },
+  {
+    "function": "cmdTestConnection",
+    "loc": "310-339",
+    "severity": "med",
+    "line_hint": "const text = res.content.map((c) => c.text).join('');",
+    "description": "Potential TypeError if res.content is undefined or not an array, or if content items lack text property"
+  },
+  {
+    "function": "cmdTestConnection",
+    "loc": "310-339",
+    "severity": "low",
+    "line_hint": "out.appendLine(`  tokens    : ${res.usage.input_tokens} in / ${res.usage.output_tokens} out`);",
+    "description": "Potential TypeError if res.usage is undefined or missing input_tokens/output_tokens properties"
+  },
+  {
+    "function": "runChat",
+    "loc": "402-419",
+    "severity": "med",
+    "line_hint": "const out = vscode.window.createOutputChannel('Kritical SCXCode');",
+    "description": "Output channel is created but never disposed, potentially causing memory leaks if function is called repeatedly."
+  },
+  {
+    "function": "runChat",
+    "loc": "402-419",
+    "severity": "low",
+    "line_hint": "const text = res.content.map((c) => c.text).join('');",
+    "description": "No null/undefined check on res.content before mapping, could throw if response structure is unexpected."
+  },
+  {
+    "function": "chatHtml",
+    "loc": "464-650",
+    "severity": "med",
+    "line_hint": "Line with regex /\\`\\`\\`(\\\\w*)\\\\n?([\\\\s\\\\S]*?)\\`\\`\\`/g",
+    "description": "Incorrect regex escape sequences; should be /```(\\w*)\\n?([\\s\\S]*?)```/g to properly match code blocks."
+  },
+  {
+    "function": "chatHtml",
+    "loc": "464-650",
+    "severity": "low",
+    "line_hint": "Line with regex /\\*\\*([^*]+)\\*\\*/g",
+    "description": "Regex for bold markdown may not match all cases correctly and could be overly restrictive with [^*] character class."
+  },
+  {
+    "function": "resolveWebviewView",
+    "loc": "663-728",
+    "severity": "high",
+    "line_hint": "Line 679 (messagesForApi modification)",
+    "description": "Modifies the last message in messagesForApi by overwriting it with combined context and msg.text, but this loses the original user message content and may lead to incorrect chat history or context duplication."
+  },
+  {
+    "function": "resolveWebviewView",
+    "loc": "663-728",
+    "severity": "med",
+    "line_hint": "Line 701 (key switching logic)",
+    "description": "Hardcodes newIndex to 2 when switching keys, which does not correctly rotate through available keys and will always report index 2 regardless of actual key used."
+  },
+  {
+    "function": "resolveWebviewView",
+    "loc": "663-728",
+    "severity": "low",
+    "line_hint": "Line 701 (process.env.SCX_API_KEY assignment)",
+    "description": "Directly modifies process.env.SCX_API_KEY, which may not persist as expected across the extension and could lead to inconsistent state if other parts rely on this environment variable."
+  }
+]
