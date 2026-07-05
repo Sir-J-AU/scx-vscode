@@ -111,6 +111,9 @@ if (-not $NoBanner) {
     Write-Host "  Kritical Pty Ltd · $email · ph. $phone" -ForegroundColor DarkCyan
     Write-Host '  Sovereign Australian AI — powered by Southern Cross AI (SCX)' -ForegroundColor Yellow
     Write-Host ''
+    Write-Host '  ══ Kritical.SCXCodex ══  OpenAI Codex, customised for Southern Cross AI' -ForegroundColor Cyan
+    Write-Host '     https://scx.ai · a Seriously Kritical(TM) Production · vanilla codex untouched' -ForegroundColor DarkCyan
+    Write-Host ''
     Write-Host "  Agentic codex on SCX · model: $Model · endpoint: $baseUrl" -ForegroundColor Gray
     Write-Host '  Your real ~/.codex (MCP servers, plugins) is reused but NEVER modified.' -ForegroundColor DarkGray
     Write-Host ''
