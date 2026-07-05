@@ -1,0 +1,46 @@
+{
+  "name": "@kritical/scxcode-agent",
+  "version": "0.1.0",
+  "description": "Kritical Node.js SCXCode Agent — multi-provider bridge daemon with auto-continuation, web tools, HR27 write-through. Additive layer over the operator's existing Claude Code / Codex / SCX PS module — HR29-compliant.",
+  "type": "module",
+  "author": "Joshua Finley <sales@kritical.net> (Kritical Pty Ltd)",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "src/server.mjs",
+  "bin": {
+    "kritical-scxcode-agent": "src/cli.mjs"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "fastify": "^5.0.0",
+    "undici": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sir-J-AU/Kritical.SCXCode.git"
+  },
+  "homepage": "https://kritical.net",
+  "bugs": {
+    "email": "sales@kritical.net"
+  },
+  "keywords": [
+    "kritical",
+    "scx",
+    "southern-cross-ai",
+    "litellm",
+    "sovereign-ai",
+    "australia",
+    "multi-provider",
+    "coding-agent"
+  ]
+}

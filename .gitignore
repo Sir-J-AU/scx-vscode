@@ -1,0 +1,19 @@
+# Per HR14: node_modules NEVER inside OneDrive-synced repo tree.
+# The installer routes pnpm/npm install via %TEMP% or D:\ per HR14.
+node_modules/
+*.log
+.env
+.env.local
+.env.*.local
+
+# Playwright cache
+playwright-report/
+test-results/
+
+# Build outputs
+dist/
+build/
+*.tgz
+
+# Local state
+*.pid
