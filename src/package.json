@@ -2,7 +2,7 @@
   "name": "SCXCode",
   "displayName": "Kritical SCXCode",
   "description": "SCX in VS Code the Kritical way — chat + inline complete + model picker + auto-failover for MiniMax-M2.7 / MAGPiE / gpt-oss-120b / DeepSeek-V3.1 / coder / gemma-4 / Qwen3 / Llama-4-Maverick.",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "publisher": "kritical",
   "author": {
     "name": "Joshua Finley",

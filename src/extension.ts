@@ -190,6 +190,41 @@ function fetchLiveModels(): void {
 }
 
 // .5213 — read-only MCP-server summary for the panel's 🔌 MCP button (Codex config.toml).
+// .5230 — real file+folder attach from the local machine. Accepts files AND folders (folders recurse),
+// reads text files (skips node_modules/.git/out/dist/binaries), caps per-file + total so a huge folder
+// can't blow the context. Shared by both the panel and the sidebar upload handlers.
+async function collectAttachments(uris: vscode.Uri[]): Promise<{ block: string; fileCount: number; chars: number }> {
+  const MAX_FILES = 80, MAX_TOTAL = 220000, PER_FILE = 24000;
+  const textExt = /\.(ts|tsx|js|jsx|mjs|cjs|py|ps1|psm1|al|md|json|ya?ml|toml|html|htm|css|scss|less|liquid|txt|xml|svg|sql|sh|bat|c|cpp|h|hpp|go|rs|java|kt|rb|php|cs|vue|svelte|graphql|env|ini|cfg|conf)$/i;
+  const skip = /(^|[\\/])(node_modules|\.git|out|dist|\.alpackages|\.venv|bin|obj|\.next)([\\/]|$)/i;
+  const files: vscode.Uri[] = [];
+  async function walk(u: vscode.Uri): Promise<void> {
+    if (files.length >= MAX_FILES) { return; }
+    let stat: vscode.FileStat; try { stat = await vscode.workspace.fs.stat(u); } catch { return; }
+    if (stat.type === vscode.FileType.Directory) {
+      if (skip.test(u.path)) { return; }
+      let entries: [string, vscode.FileType][]; try { entries = await vscode.workspace.fs.readDirectory(u); } catch { return; }
+      for (const [name] of entries) { if (files.length >= MAX_FILES) { break; } await walk(vscode.Uri.joinPath(u, name)); }
+    } else if (stat.type === vscode.FileType.File) {
+      if (!skip.test(u.path) && (textExt.test(u.path) || stat.size < 80000)) { files.push(u); }
+    }
+  }
+  for (const u of uris) { await walk(u); }
+  let block = '', chars = 0, count = 0;
+  for (const f of files) {
+    if (chars >= MAX_TOTAL) { break; }
+    try {
+      const bytes = await vscode.workspace.fs.readFile(f);
+      let content = Buffer.from(bytes).toString('utf8');
+      if (/�/.test(content.slice(0, 200))) { continue; } // looks binary — skip
+      if (content.length > PER_FILE) { content = content.slice(0, PER_FILE) + '\n…(truncated)'; }
+      const rel = vscode.workspace.asRelativePath(f);
+      block += `\n\n## Attached: ${rel}\n\`\`\`\n${content}\n\`\`\`\n`;
+      chars += content.length; count++;
+    } catch { /* skip unreadable */ }
+  }
+  return { block, fileCount: count, chars };
+}
 function mcpSummary(): string {
   const lines: string[] = ['**MCP servers & tools**', ''];
   try {
@@ -687,16 +722,11 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       try { await vscode.workspace.getConfiguration('kritical.scxcode').update(msg.key, msg.value, vscode.ConfigurationTarget.Global); }
       catch (e) { panel.webview.postMessage({ type: 'error', error: 'Setting update failed: ' + (e as Error).message }); }
     } else if (msg.type === 'uploadFile') {
-      const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Attach to SCXCode' });
-      if (picked && picked[0]) {
-        try {
-          const bytes = await vscode.workspace.fs.readFile(picked[0]);
-          let content = Buffer.from(bytes).toString('utf8');
-          if (content.length > 24000) { content = content.slice(0, 24000) + '\n…(truncated)'; }
-          const name = picked[0].path.split('/').pop() || 'file';
-          attached += `\n\n## Attached file: ${name}\n\`\`\`\n${content}\n\`\`\`\n`;
-          panel.webview.postMessage({ type: 'fileAttached', name, chars: content.length });
-        } catch (e) { panel.webview.postMessage({ type: 'error', error: 'File read failed: ' + (e as Error).message }); }
+      const picked = await vscode.window.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: true, openLabel: 'Attach files/folders to SCXCode' });
+      if (picked && picked.length) {
+        const { block, fileCount, chars } = await collectAttachments(picked);
+        if (fileCount) { attached += block; panel.webview.postMessage({ type: 'fileAttached', name: `${fileCount} file(s)`, chars }); }
+        else { panel.webview.postMessage({ type: 'error', error: 'No readable text files in that selection.' }); }
       }
     } else if (msg.type === 'attachRepo') {
       const found = await vscode.workspace.findFiles('**/*.{ts,js,py,ps1,psm1,al,md,json,yaml,yml}', '**/{node_modules,out,.git,.alpackages}/**', 80);
@@ -805,7 +835,7 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
 <div id="chat"></div>
 <div class="input">
   <div class="toolbar">
-    <button class="tool-btn" id="tbUpload" title="Upload a file into the next message">📎 File</button>
+    <button class="tool-btn" id="tbUpload" title="Attach files AND folders from your machine (multi-select; folders are read recursively). Reads real local file contents into the next message.">📎 File / Folder</button>
     <button class="tool-btn" id="tbRepo" title="Attach a workspace file summary">📁 Repo</button>
     <button class="tool-btn" id="tbMcp" title="MCP servers &amp; tools">🔌 MCP</button>
     <button class="tool-btn" id="tbCodex" title="Open SCX Codex (Kritical/SCX-branded Codex CLI) in a terminal — never touches your real codex config">✦ SCX Codex</button>
@@ -999,7 +1029,7 @@ window.addEventListener('message', (e) => {
 // the real defaultModel (and the '…' placeholder resolves).
 vscode.postMessage({ type: 'config' });
 </script>
-<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.16</div>
+<div class="footer">© 2026 Kritical Pty Ltd · Kritical SCXCode v0.1.17</div>
 </body></html>`;
 }
 
@@ -1081,18 +1111,11 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           view.webview.postMessage({ type: 'error', error: 'Setting update failed: ' + (e as Error).message });
         }
       } else if (msg.type === 'uploadFile') {
-        const picked = await vscode.window.showOpenDialog({ canSelectMany: false, openLabel: 'Attach to SCXCode' });
-        if (picked && picked[0]) {
-          try {
-            const bytes = await vscode.workspace.fs.readFile(picked[0]);
-            let content = Buffer.from(bytes).toString('utf8');
-            if (content.length > 24000) { content = content.slice(0, 24000) + '\n…(truncated)'; }
-            const name = picked[0].path.split('/').pop() || 'file';
-            this._attached += `\n\n## Attached file: ${name}\n\`\`\`\n${content}\n\`\`\`\n`;
-            view.webview.postMessage({ type: 'fileAttached', name, chars: content.length });
-          } catch (e) {
-            view.webview.postMessage({ type: 'error', error: 'File read failed: ' + (e as Error).message });
-          }
+        const picked = await vscode.window.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: true, openLabel: 'Attach files/folders to SCXCode' });
+        if (picked && picked.length) {
+          const { block, fileCount, chars } = await collectAttachments(picked);
+          if (fileCount) { this._attached += block; view.webview.postMessage({ type: 'fileAttached', name: `${fileCount} file(s)`, chars }); }
+          else { view.webview.postMessage({ type: 'error', error: 'No readable text files in that selection.' }); }
         }
       } else if (msg.type === 'attachRepo') {
         const found = await vscode.workspace.findFiles('**/*.{ts,js,py,ps1,psm1,al,md,json,yaml,yml}', '**/{node_modules,out,.git,.alpackages}/**', 80);
