@@ -87,6 +87,37 @@ Whisper-Large-v3 (speech), opir-large (moderation).
 (`tempSrc`: `rec` published / `def` neutral 0.7 / `api` live / `you` override). Only surface sampling
 params the model's `supported_sampling_parameters` lists.
 
+### 1e. Anthropic tool-use, embeddings, moderation, stateful (probe #2)
+
+| Capability | Result | Notes |
+|---|---|---|
+| `/v1/messages` + `tools` (Anthropic-shape) | ✅ 200 `stop_reason=tool_use` | **SCX does agentic tool use in Anthropic shape** — the extension (and any Claude-shape agent) can be agentic direct, no shim |
+| `/v1/messages` + `tool_choice:{type:tool,name}` | ✅ 200 emits `tool_use` | |
+| `/v1/embeddings` model `E5-Mistral-7B-Instruct` | ✅ 200 `embedding` | use SCX id, not `text-embedding-3-*` (400 unsupported) |
+| `/v1/moderations` model `opir-large` | ✅ 200 | |
+| `/v1/responses` `store:true` + `previous_response_id` | ✅ 200 both | **stateful chaining works** — server-side conversation memory |
+| `/v1/responses` `stream:true` **with tools** | ⚠️ 502 on some shapes | streaming works in practice (codex streamed fine through the shim) but tool+stream is not 100% on every request shape — treat as best-effort + retry |
+
+### 1f. Which models are AGENTIC-capable (emit `function_call` on `/v1/responses`)
+
+Probed with `tool_choice:required`:
+
+| Model | function_call? |
+|---|---|
+| gpt-oss-120b | ✅ |
+| MiniMax-M2.7 | ✅ |
+| coder | ✅ (parallel calls too) |
+| gemma-4-31B-it | ✅ |
+| Meta-Llama-3.3-70B-Instruct | ✅ |
+| Llama-4-Maverick-17B-128E-Instruct | ✅ |
+| Qwen3-32B | ❌ 400 "Invalid function calling output" |
+| MAGPiE | ❌ 502 "Upstream provider returned an error" |
+| DeepSeek-V3.1 | ⏳ strict RPM (429 during probe) — retry-gated, not tool-broken |
+
+**UI rule:** the SCX Codex / agentic model picker should default to and prefer the ✅ set
+(MiniMax-M2.7 or coder for coding). Flag Qwen3-32B / MAGPiE as "chat-only, not agentic" so codex isn't
+pointed at a model that can't tool-call.
+
 ---
 
 ## 2. Direct-SCX wiring (HR1/HR29-correct, no router)
