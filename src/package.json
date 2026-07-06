@@ -345,6 +345,36 @@
           "description": "Cost + latency telemetry. `off` = zero collection. `local-only` = writes to Kritical.SCXCode.log in workspace. `kritical-endpoint` = also POSTs to Kritical telemetry endpoint (requires opt-in HKCU var).",
           "scope": "application"
         },
+        "kritical.scxcode.storageBackend": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "sqlite",
+            "mssql"
+          ],
+          "enumDescriptions": [
+            "Use the local SQLite corpus when populated; otherwise try the SQL Server Express Lens store.",
+            "Use only the local SQLite corpus store used by store-mcp/kritical-local-store.mjs.",
+            "Use only SQL Server Express / KriticalSCXCodeStore Lens tables."
+          ],
+          "description": "Backing store used by Kritical Lens Looking Glass."
+        },
+        "kritical.scxcode.sqliteStorePath": {
+          "type": "string",
+          "default": "",
+          "description": "SQLite corpus path. Empty resolves to KRIT_LOCAL_STORE or ~/.kritical-scx/scxcode-store.db."
+        },
+        "kritical.scxcode.mssqlServer": {
+          "type": "string",
+          "default": ".\\SQLEXPRESS",
+          "description": "SQL Server instance for the SCXCode Lens big store."
+        },
+        "kritical.scxcode.mssqlDatabase": {
+          "type": "string",
+          "default": "KriticalSCXCodeStore",
+          "description": "SQL Server database containing dbo.LensSource / dbo.LensCorpusFile / dbo.LensSymbol."
+        },
         "kritical.scxcode.autoContext": {
           "type": "string",
           "default": "file+selection",
@@ -423,7 +453,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.1",
     "typescript": "^5.5.0"
   },
   "repository": {

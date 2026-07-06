@@ -54,7 +54,7 @@ $scxDirect   = 'https://api.scx.ai/v1'
 # (reserved-name clash) — so it's excluded here; use it in the chat panel instead. MAGPiE / Qwen3-32B
 # are chat-only (no tool calls). See spec §1f.
 $agenticModels = @('gpt-oss-120b','MiniMax-M2.7','gemma-4-31B-it','Meta-Llama-3.3-70B-Instruct','Llama-4-Maverick-17B-128E-Instruct')
-$defaultAgentic = 'gpt-oss-120b'
+$defaultAgentic = 'MiniMax-M2.7'
 
 # HR1/HR29: SCX key only. We never read/write OPENAI_* or ANTHROPIC_*.
 $scxKey = [Environment]::GetEnvironmentVariable('SCX_API_KEY','User'); if (-not $scxKey) { $scxKey = $env:SCX_API_KEY }
@@ -157,6 +157,14 @@ if (-not $NoLog) {
 # Resolve codex CLI (robust across npm shim / arm64 vendor exe / winget / cargo / brew)
 # ------------------------------------------------------------
 function Resolve-CodexCommand {
+    # Prefer the compiled branded package when installed. This keeps the VS Code "SCX Codex"
+    # button on Kritical.SCXCodex.exe instead of silently falling back to a stock `codex` on PATH.
+    $compiled = 'C:\KriticalSCX\dist\Kritical.SCXCodex\bin\Kritical.SCXCodex.exe'
+    if (Test-Path $compiled -ErrorAction SilentlyContinue) { return $compiled }
+    $pinned = [Environment]::GetEnvironmentVariable('KRITICAL_SCXCODEX_PATH','Process')
+    if ($pinned -and (Test-Path $pinned -ErrorAction SilentlyContinue)) { return $pinned }
+    $pinnedUser = [Environment]::GetEnvironmentVariable('KRITICAL_SCXCODEX_PATH','User')
+    if ($pinnedUser -and (Test-Path $pinnedUser -ErrorAction SilentlyContinue)) { return $pinnedUser }
     $c = Get-Command codex -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($c) { return $c.Source }
     $cands = @(

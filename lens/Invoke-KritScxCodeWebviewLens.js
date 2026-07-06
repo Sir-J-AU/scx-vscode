@@ -16,12 +16,16 @@
 const fs = require('fs'), path = require('path');
 const ROOT = path.join(__dirname, '..');
 const bundle = fs.readFileSync(path.join(ROOT, 'src', 'out', 'extension.js'), 'utf8');
+const source = fs.readFileSync(path.join(ROOT, 'src', 'extension.ts'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'src', 'package.json'), 'utf8'));
 const STRICT = process.argv.includes('--strict');
 const AS_JSON = process.argv.includes('--json');
 
-// the webview HTML+script is embedded in the bundle; pull the largest template-literal chatHtml body.
-const htmlMatch = bundle.match(/<div class="top">[\s\S]*?<\/body>/);
+// the chat webview HTML+script is embedded in source/bundle. Prefer source so a Looking Glass snippet
+// cannot satisfy the first <div class="top"> match and blind the control lens.
+const chatStart = source.indexOf('function chatHtml()');
+const chatSource = chatStart >= 0 ? source.slice(chatStart) : source;
+const htmlMatch = chatSource.match(/<div class="top">[\s\S]*?<\/body>/) || bundle.match(/<div class="top">[\s\S]*?<\/body>/);
 const html = htmlMatch ? htmlMatch[0] : '';
 const scriptZone = bundle.slice(bundle.indexOf('acquireVsCodeApi'), bundle.indexOf('vscode.postMessage({ type: \'config\' })') + 200);
 

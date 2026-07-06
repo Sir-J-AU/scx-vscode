@@ -14,7 +14,7 @@ import * as vscode from 'vscode';
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import * as tomlLib from '@iarna/toml';
 
 interface ScxMessage { role: 'user' | 'assistant' | 'system'; content: string; }
@@ -90,6 +90,10 @@ function getConfig() {
     autocompact: c.get<'off' | 'auto' | 'aggressive'>('autocompact', 'auto'),
     systemPrompt: c.get<string>('systemPrompt', ''),
     telemetry: c.get<'off' | 'local-only' | 'kritical-endpoint'>('telemetry', 'off'),
+    storageBackend: c.get<'auto' | 'sqlite' | 'mssql'>('storageBackend', 'auto'),
+    sqliteStorePath: c.get<string>('sqliteStorePath', ''),
+    mssqlServer: c.get<string>('mssqlServer', '.\\SQLEXPRESS'),
+    mssqlDatabase: c.get<string>('mssqlDatabase', 'KriticalSCXCodeStore'),
     // .5165e — auto-context wiring
     autoContext: c.get<'off' | 'file' | 'file+selection' | 'workspace-tree'>('autoContext', 'file+selection'),
     autoContextMaxChars: c.get<number>('autoContextMaxChars', 8000),
@@ -1198,9 +1202,9 @@ const LOOKING_GLASS_HTML = String.raw`<!doctype html>
   </main>
 
   <div class="foot">
-    <span>Corpus + symbols <b>LIVE</b> from the local store · findings are prototype samples</span>
-    <span>local SQLite <b id="footDb">~/.kritical-scx/scxcode-store.db</b> · tables <b>files</b>, <b>symbols</b></span>
-    <span>SQL Server <b>dbo.v_LensFindings</b> · <b>dbo.LensSource</b> / <b>dbo.LensSymbol</b> (next)</span>
+    <span>Corpus + symbols <b>LIVE</b> from the selected store · findings are prototype samples</span>
+    <span>storage <b id="footBackend">auto</b> · <b id="footDb">~/.kritical-scx/scxcode-store.db</b></span>
+    <span>SQLite <b>files/symbols</b> · SQL Server <b>dbo.LensSource</b> / <b>dbo.LensSymbol</b></span>
     <span id="footRepo"></span>
   </div>
 </div>
@@ -1516,18 +1520,19 @@ function showCorpusMessage(html){
   $('#fileCount').textContent = '0 / 0';
   $('#symCount').textContent = '0 / 0';
 }
-function emptyStateHtml(reason, dbPath){
+function emptyStateHtml(reason, dbPath, backend){
   const why = reason==='missing'
-    ? 'No local corpus store was found at:'
-    : 'The local corpus store exists but has no mined files/symbols yet:';
+    ? 'No selected corpus store was found at:'
+    : 'The selected corpus store exists but has no mined files/symbols yet:';
   return '<div class="empty">'+
     '<h3>The glass is empty</h3>'+
     '<p>'+why+'</p>'+
+    '<p>Backend: <b>'+esc(backend||'auto')+'</b></p>'+
     '<p><code>'+esc(dbPath||'~/.kritical-scx/scxcode-store.db')+'</code></p>'+
-    '<p>Populate it by mining a repo with the local store:</p>'+
+    '<p>Populate it by mining a repo with SQLite or the SQL Server Lens ingest:</p>'+
     '<div class="cmd">node store-mcp/kritical-local-store.mjs mine &lt;repoRoot&gt;\n\n'+
     '# then reopen: Kritical SCX: Open Lens Looking Glass</div>'+
-    '<p style="margin-top:14px;color:var(--ink-faint)">The miner writes files(path,lang,loc,content) + symbols(name,path,line,kind) into the store this glass reads.</p>'+
+    '<p style="margin-top:14px;color:var(--ink-faint)">SQLite reads files/symbols directly. SQL Server reads byte-exact dbo.LensSource content plus dbo.LensSymbol from KriticalSCXCodeStore.</p>'+
     '</div>';
 }
 function markStore(state, dim){
@@ -1541,19 +1546,22 @@ window.addEventListener('message', ev => {
   if (m.type === 'lensData') {
     FILES = m.files || [];
     SYMBOLS = m.symbols || [];
+    if (m.backend) $('#footBackend').textContent = m.backend;
     if (m.dbPath) $('#footDb').textContent = m.dbPath.replace(/\\/g,'/');
     renderAll();
     markStore('online', false);
   } else if (m.type === 'lensEmpty') {
     FILES = []; SYMBOLS = [];
     initStats();
+    if (m.backend) $('#footBackend').textContent = m.backend;
     if (m.dbPath) $('#footDb').textContent = m.dbPath.replace(/\\/g,'/');
-    showCorpusMessage(emptyStateHtml(m.reason, m.dbPath));
+    showCorpusMessage(emptyStateHtml(m.reason, m.dbPath, m.backend));
     renderFindSummary(); updateClsNote(); renderFindings();  // findings still render (samples)
     markStore(m.reason==='missing'?'no store':'empty', true);
   } else if (m.type === 'lensError') {
     FILES = []; SYMBOLS = [];
     initStats();
+    if (m.backend) $('#footBackend').textContent = m.backend;
     showCorpusMessage('<div class="empty"><h3>Could not read the store</h3><p>'+esc(m.error||'unknown error')+'</p><p><code>'+esc(m.dbPath||'')+'</code></p></div>');
     renderFindSummary(); updateClsNote(); renderFindings();
     markStore('error', true);
@@ -1599,21 +1607,27 @@ try { (function(){
 </body>
 </html>`;
 
-// .5231 — resolve the local store path the SAME way store-mcp/kritical-local-store.mjs does:
-//   process.env.KRIT_LOCAL_STORE || ~/.kritical-scx/scxcode-store.db
-function lensStorePath(): string {
-  return process.env.KRIT_LOCAL_STORE || path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'scxcode-store.db');
-}
-
 type LensFile = { path: string; lang: string; loc: number; fns: number; content: string };
 type LensSymbol = { name: string; path: string; line: number; kind: string };
+type LensBackend = 'sqlite' | 'mssql';
+type LensStore = { files: LensFile[]; symbols: LensSymbol[]; dbPath: string; backend: LensBackend };
+
+function sqliteLensStorePath(): string {
+  const cfg = getConfig();
+  return cfg.sqliteStorePath || process.env.KRIT_LOCAL_STORE || path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'scxcode-store.db');
+}
+
+function mssqlLensStoreLabel(): string {
+  const cfg = getConfig();
+  return `${cfg.mssqlServer}/${cfg.mssqlDatabase}`;
+}
 
 // .5231 — read the corpus store read-only via node:sqlite DatabaseSync (extension host is Node ≥ 22).
 // Lazy-require node:sqlite so a Node build without the flag can't break activation of the whole extension.
 // Columns mirror the local store schema: files(path,lang,loc,sha,fn_count,content,mined_utc),
 // symbols(path,name,kind,line). Returns null when the DB is missing so the webview shows an empty-state.
-function readLensStore(): { files: LensFile[]; symbols: LensSymbol[]; dbPath: string } | null {
-  const dbPath = lensStorePath();
+function readSqliteLensStore(): LensStore | null {
+  const dbPath = sqliteLensStorePath();
   if (!fs.existsSync(dbPath)) { return null; }
   let DatabaseSync: any;
   try { ({ DatabaseSync } = require('node:sqlite')); }
@@ -1624,10 +1638,72 @@ function readLensStore(): { files: LensFile[]; symbols: LensSymbol[]; dbPath: st
       .map((r: any) => ({ path: r.path, lang: r.lang, loc: r.loc | 0, fns: r.fn_count | 0, content: r.content || '' }));
     const symbols: LensSymbol[] = db.prepare('SELECT name, path, line, kind FROM symbols ORDER BY name').all()
       .map((r: any) => ({ name: r.name, path: r.path, line: r.line | 0, kind: r.kind || 'function' }));
-    return { files, symbols, dbPath };
+    return { files, symbols, dbPath, backend: 'sqlite' };
   } finally {
     try { db.close(); } catch { /* best effort */ }
   }
+}
+
+function readSqlcmdJson(server: string, database: string, query: string): any[] {
+  const out = execFileSync('sqlcmd', ['-S', server, '-d', database, '-E', '-W', '-h', '-1', '-y', '0', '-Y', '0', '-Q', `SET NOCOUNT ON; ${query}`], {
+    encoding: 'utf8',
+    timeout: 8000,
+    windowsHide: true,
+  }).trim();
+  const json = out.replace(/\r?\n/g, '').trim();
+  if (!json) { return []; }
+  return JSON.parse(json);
+}
+
+function decodeSqlHexText(hex: unknown): string {
+  if (typeof hex !== 'string' || !hex) { return ''; }
+  try { return Buffer.from(hex, 'hex').toString('utf8'); }
+  catch { return ''; }
+}
+
+function readMssqlLensStore(): LensStore | null {
+  const cfg = getConfig();
+  const label = mssqlLensStoreLabel();
+  const fileQuery = `
+IF OBJECT_ID('dbo.LensSource') IS NOT NULL
+BEGIN
+  SELECT TOP (500) path, ISNULL(NULLIF(ext,''),'txt') AS lang, line_count AS loc, CAST(0 AS int) AS fn_count, CONVERT(varchar(max), DECOMPRESS(content_gz), 2) AS content_hex FROM dbo.LensSource ORDER BY path FOR JSON PATH
+END
+ELSE IF OBJECT_ID('dbo.LensCorpusFile') IS NOT NULL
+BEGIN
+  SELECT TOP (500) path, ISNULL(NULLIF(lang,''),'txt') AS lang, loc, function_count AS fn_count, CAST('' AS nvarchar(max)) AS content FROM dbo.LensCorpusFile ORDER BY path FOR JSON PATH
+END
+ELSE
+BEGIN
+  SELECT CAST('' AS nvarchar(4000)) AS path, CAST('txt' AS nvarchar(32)) AS lang, CAST(0 AS int) AS loc, CAST(0 AS int) AS fn_count, CAST('' AS nvarchar(max)) AS content WHERE 1=0 FOR JSON PATH
+END`;
+  const symbolQuery = `
+IF OBJECT_ID('dbo.LensSymbol') IS NOT NULL
+BEGIN
+  SELECT TOP (2000) name, path, start_line AS line, kind FROM dbo.LensSymbol ORDER BY name FOR JSON PATH
+END
+ELSE
+BEGIN
+  SELECT CAST('' AS nvarchar(4000)) AS name, CAST('' AS nvarchar(4000)) AS path, CAST(0 AS int) AS line, CAST('symbol' AS nvarchar(64)) AS kind WHERE 1=0 FOR JSON PATH
+END`;
+  const files = readSqlcmdJson(cfg.mssqlServer, cfg.mssqlDatabase, fileQuery)
+    .map((r: any) => ({ path: r.path, lang: r.lang || 'txt', loc: r.loc | 0, fns: r.fn_count | 0, content: r.content || decodeSqlHexText(r.content_hex) }));
+  const symbols = readSqlcmdJson(cfg.mssqlServer, cfg.mssqlDatabase, symbolQuery)
+    .map((r: any) => ({ name: r.name, path: r.path, line: r.line | 0, kind: r.kind || 'symbol' }));
+  return { files, symbols, dbPath: label, backend: 'mssql' };
+}
+
+function readLensStore(): LensStore | null {
+  const cfg = getConfig();
+  if (cfg.storageBackend === 'sqlite') { return readSqliteLensStore(); }
+  if (cfg.storageBackend === 'mssql') { return readMssqlLensStore(); }
+  const sqlite = readSqliteLensStore();
+  if (sqlite && (sqlite.files.length || sqlite.symbols.length)) { return sqlite; }
+  try {
+    const mssql = readMssqlLensStore();
+    if (mssql && (mssql.files.length || mssql.symbols.length)) { return mssql; }
+  } catch { /* auto mode: SQL Server is optional */ }
+  return sqlite;
 }
 
 async function cmdLookingGlass(ctx: vscode.ExtensionContext) {
@@ -1643,16 +1719,18 @@ async function cmdLookingGlass(ctx: vscode.ExtensionContext) {
       try {
         const store = readLensStore();
         if (!store) {
-          panel.webview.postMessage({ type: 'lensEmpty', reason: 'missing', dbPath: lensStorePath() });
+          const cfg = getConfig();
+          panel.webview.postMessage({ type: 'lensEmpty', reason: 'missing', dbPath: cfg.storageBackend === 'mssql' ? mssqlLensStoreLabel() : sqliteLensStorePath(), backend: cfg.storageBackend });
           return;
         }
         if (!store.files.length && !store.symbols.length) {
-          panel.webview.postMessage({ type: 'lensEmpty', reason: 'empty', dbPath: store.dbPath });
+          panel.webview.postMessage({ type: 'lensEmpty', reason: 'empty', dbPath: store.dbPath, backend: store.backend });
           return;
         }
-        panel.webview.postMessage({ type: 'lensData', files: store.files, symbols: store.symbols, dbPath: store.dbPath });
+        panel.webview.postMessage({ type: 'lensData', files: store.files, symbols: store.symbols, dbPath: store.dbPath, backend: store.backend });
       } catch (e) {
-        panel.webview.postMessage({ type: 'lensError', error: (e as Error).message, dbPath: lensStorePath() });
+        const cfg = getConfig();
+        panel.webview.postMessage({ type: 'lensError', error: (e as Error).message, dbPath: cfg.storageBackend === 'mssql' ? mssqlLensStoreLabel() : sqliteLensStorePath(), backend: cfg.storageBackend });
       }
     }
   });
@@ -2246,7 +2324,11 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
         model_reasoning_summary: codex.model_reasoning_summary || 'auto', model_verbosity: codex.model_verbosity || 'medium',
       },
       mcp: Object.keys(mcp).map((name) => ({ name, command: mcp[name].command || '', args: Array.isArray(mcp[name].args) ? mcp[name].args.join(' ') : '', env: mcp[name].env ? JSON.stringify(mcp[name].env) : '' })),
-      scxcode: { baseUrl: cfg.baseUrl, defaultModel: cfg.defaultModel, apiKeySet: !!cfg.apiKey, keyCount: cfg.apiKeys.length, temperature: cfg.temperature },
+      scxcode: {
+        baseUrl: cfg.baseUrl, defaultModel: cfg.defaultModel, apiKeySet: !!cfg.apiKey, keyCount: cfg.apiKeys.length, temperature: cfg.temperature,
+        storageBackend: cfg.storageBackend, sqliteStorePath: cfg.sqliteStorePath, sqliteResolvedPath: sqliteLensStorePath(),
+        mssqlServer: cfg.mssqlServer, mssqlDatabase: cfg.mssqlDatabase,
+      },
       codexConfigPath: codexConfigPath(),
     };
   }
@@ -2277,6 +2359,10 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
         const c = vscode.workspace.getConfiguration('kritical.scxcode');
         await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
         await c.update('defaultModel', m.defaultModel, vscode.ConfigurationTarget.Global);
+        await c.update('storageBackend', m.storageBackend || 'auto', vscode.ConfigurationTarget.Global);
+        await c.update('sqliteStorePath', m.sqliteStorePath || '', vscode.ConfigurationTarget.Global);
+        await c.update('mssqlServer', m.mssqlServer || '.\\SQLEXPRESS', vscode.ConfigurationTarget.Global);
+        await c.update('mssqlDatabase', m.mssqlDatabase || 'KriticalSCXCodeStore', vscode.ConfigurationTarget.Global);
         post({ type: 'saved', section: 'scxcode', ok: true });
       } catch (e: any) { post({ type: 'saved', section: 'scxcode', ok: false, error: e.message }); }
     } else if (m.type === 'launchCodex') { vscode.commands.executeCommand('kritical.scxcode.scxCodex'); }
@@ -2379,6 +2465,15 @@ function setupGuiHtml(logoUri: string): string {
       <label>SCX API base URL</label><input id="sx-base" placeholder="https://api.scx.ai">
       <label>Default model</label><select id="sx-model"></select>
       <div class="note" id="sx-model-note"></div>
+      <label>Backing store</label><select id="sx-storage">
+        <option value="auto">Auto — SQLite first, SQL Server fallback</option>
+        <option value="sqlite">SQLite local store</option>
+        <option value="mssql">SQL Server Express big store</option>
+      </select>
+      <div class="note" id="sx-storage-note"></div>
+      <label>SQLite store path</label><input id="sx-sqlite-path" placeholder="~/.kritical-scx/scxcode-store.db">
+      <label>SQL Server instance</label><input id="sx-mssql-server" placeholder=".\\SQLEXPRESS">
+      <label>SQL Server database</label><input id="sx-mssql-db" placeholder="KriticalSCXCodeStore">
       <label>API key</label><input id="sx-key" disabled>
       <div><button class="save" id="save-scxcode">Save SCXCode settings</button><span id="msg-scxcode"></span></div>
     </div></div>
@@ -2451,7 +2546,7 @@ function setupGuiHtml(logoUri: string): string {
     var servers=[]; q('mcp-rows').querySelectorAll('.mcp-card').forEach(function(r){ servers.push({name:r.querySelector('.m-name').value.trim(),command:r.querySelector('.m-cmd').value.trim(),args:r.querySelector('.m-args').value.trim(),env:r.querySelector('.m-env').value.trim()}); });
     vscode.postMessage({type:'saveMcp',servers:servers});
   };
-  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value}); };
+  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value,storageBackend:q('sx-storage').value,sqliteStorePath:q('sx-sqlite-path').value.trim(),mssqlServer:q('sx-mssql-server').value.trim(),mssqlDatabase:q('sx-mssql-db').value.trim()}); };
   q('launch').onclick=function(){ vscode.postMessage({type:'launchCodex'}); };
   window.addEventListener('message',function(e){ var m=e.data;
     if(m.type==='data'){
@@ -2466,6 +2561,12 @@ function setupGuiHtml(logoUri: string): string {
       q('sx-base').value=m.scxcode.baseUrl; q('sx-key').value=m.scxcode.apiKeySet?('set · '+m.scxcode.keyCount+' key(s) in HKCU'):'NOT SET — set SCX_API_KEY';
       fillModelSelect(q('sx-model'),false);
       selectValid(q('sx-model'), m.scxcode.defaultModel, q('sx-model-note'), 'scx');
+      q('sx-storage').value=m.scxcode.storageBackend||'auto';
+      q('sx-sqlite-path').value=m.scxcode.sqliteStorePath||'';
+      q('sx-sqlite-path').placeholder=m.scxcode.sqliteResolvedPath||'~/.kritical-scx/scxcode-store.db';
+      q('sx-mssql-server').value=m.scxcode.mssqlServer||'.\\\\SQLEXPRESS';
+      q('sx-mssql-db').value=m.scxcode.mssqlDatabase||'KriticalSCXCodeStore';
+      q('sx-storage-note').innerHTML='Looking Glass uses <b>'+q('sx-storage').value+'</b>. SQLite path resolves to <code>'+(m.scxcode.sqliteResolvedPath||'~/.kritical-scx/scxcode-store.db')+'</code>; SQL Server target is <code>'+(q('sx-mssql-server').value+'/'+q('sx-mssql-db').value)+'</code>.';
       if(m.tab){ var tb=document.querySelector('.tab[data-t="'+m.tab+'"]'); if(tb) tb.click(); }
     } else if(m.type==='saved'){
       var el=q('msg-'+m.section); if(el){ if(m.ok===false){ el.className='err'; el.textContent='✗ '+(m.error||'failed'); } else { el.className='ok'; el.textContent='✓ saved'+(m.backup?(' · backup '+m.backup.split(/[\\\\/]/).pop()):''); } setTimeout(function(){el.textContent='';},6000); }
