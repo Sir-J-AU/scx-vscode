@@ -15,6 +15,7 @@ import { appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { augmentWithCorpus } from './scx-corpus-augment.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = parseInt(process.env.KRIT_SHIM_PORT || '4199', 10);
@@ -120,7 +121,11 @@ const server = http.createServer((req, res) => {
         const transformed = transformRequestBody(parsed);
         T.tools_out = (transformed.tools || []).map((t) => t && t.type);
         T.flattened = JSON.stringify(T.tools_in) !== JSON.stringify(T.tools_out);
-        firstBody = JSON.stringify(transformed);
+        // .5231 — storage->agent: auto-ground the request in retrieved corpus (opt-in KRIT_SHIM_STORE;
+        // OFF by default = byte-identical passthrough per HR29; sized to the model's real ceiling).
+        const grounded = await augmentWithCorpus(transformed, { model: parsed.model });
+        T.corpus_injected = grounded !== transformed;
+        firstBody = JSON.stringify(grounded);
       }
       let upstream = await call(firstBody);
 
