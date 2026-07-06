@@ -32,7 +32,13 @@ function db() { const d = new DatabaseSync(DB_PATH); d.exec('PRAGMA journal_mode
 function ensure(d) {
   d.exec(`CREATE TABLE IF NOT EXISTS files(file TEXT PRIMARY KEY, lang TEXT, loc INT, sha TEXT, n_chunks INT, synopsis TEXT, mined_utc TEXT);
           CREATE TABLE IF NOT EXISTS chunks(file TEXT, idx INT, start_line INT, end_line INT, sha TEXT, symbols TEXT, content TEXT, summary TEXT, PRIMARY KEY(file, idx));
-          CREATE INDEX IF NOT EXISTS ix_chunks_file ON chunks(file);`);
+          CREATE INDEX IF NOT EXISTS ix_chunks_file ON chunks(file);
+          -- .5231 6502 content-addressing: each unique chunk body stored ONCE by SHA; chunks reference it.
+          CREATE TABLE IF NOT EXISTS blobs(sha TEXT PRIMARY KEY, content TEXT);`);
+}
+// read a file's chunks, materialising content from the SHA-keyed blob (fallback to any inline content).
+function chunkRows(d, file) {
+  return d.prepare('SELECT c.idx idx, c.start_line start_line, c.end_line end_line, c.symbols symbols, COALESCE(b.content, c.content) content, c.summary summary FROM chunks c LEFT JOIN blobs b ON b.sha=c.sha WHERE c.file=? ORDER BY c.idx').all(file);
 }
 const sha = (s) => createHash('sha256').update(s, 'utf8').digest('hex');
 
@@ -59,8 +65,10 @@ function chunkFile(file) {
   const chunks = chunkText(src);
   d.exec('BEGIN');
   d.prepare('DELETE FROM chunks WHERE file=?').run(file);
-  const ins = d.prepare('INSERT INTO chunks(file,idx,start_line,end_line,sha,symbols,content,summary) VALUES(?,?,?,?,?,?,?,NULL)');
-  chunks.forEach((c, i) => ins.run(file, i, c.start, c.end, sha(c.content), c.symbols, c.content));
+  // content-addressed: store each unique body once in blobs; chunk rows reference it by SHA (content=NULL).
+  const blobIns = d.prepare('INSERT OR IGNORE INTO blobs(sha,content) VALUES(?,?)');
+  const ins = d.prepare('INSERT INTO chunks(file,idx,start_line,end_line,sha,symbols,content,summary) VALUES(?,?,?,?,?,?,NULL,NULL)');
+  chunks.forEach((c, i) => { const h = sha(c.content); blobIns.run(h, c.content); ins.run(file, i, c.start, c.end, h, c.symbols); });
   d.prepare('INSERT OR REPLACE INTO files(file,lang,loc,sha,n_chunks,synopsis,mined_utc) VALUES(?,?,?,?,?,?,?)')
     .run(file, extname(file).slice(1), src.split('\n').length, sha(src), chunks.length, null, new Date().toISOString());
   d.exec('COMMIT');
@@ -71,7 +79,7 @@ function chunkFile(file) {
   if (!ok) process.exitCode = 1;
 }
 
-function rows(file) { const d = db(); ensure(d); return d.prepare('SELECT idx,start_line,end_line,symbols,content,summary FROM chunks WHERE file=? ORDER BY idx').all(file); }
+function rows(file) { const d = db(); ensure(d); return chunkRows(d, file); }
 
 // One compact map line per chunk: idx, line range, symbols, and a summary (SCX) or first-line preview.
 function mapLine(r) {
@@ -139,10 +147,12 @@ function applyChunk(file, idx, newFile) {
   if (!existing) { console.error(`[apply] no chunk #${idx} for ${file}`); process.exitCode = 1; return; }
   const startEnd = d.prepare('SELECT start_line,end_line FROM chunks WHERE file=? AND idx=?').get(file, +idx);
   const newLoc = newContent.split('\n').length;
-  d.prepare('UPDATE chunks SET content=?, sha=?, end_line=? WHERE file=? AND idx=?')
-    .run(newContent, sha(newContent), startEnd.start_line + newLoc - 1, file, +idx);
-  // renumber downstream line ranges + reassemble the file to disk
-  const rs = d.prepare('SELECT idx,content FROM chunks WHERE file=? ORDER BY idx').all(file);
+  const h = sha(newContent);
+  d.prepare('INSERT OR IGNORE INTO blobs(sha,content) VALUES(?,?)').run(h, newContent);   // content-addressed
+  d.prepare('UPDATE chunks SET content=NULL, sha=?, end_line=? WHERE file=? AND idx=?')
+    .run(h, startEnd.start_line + newLoc - 1, file, +idx);
+  // renumber downstream line ranges + reassemble the file to disk (content materialised via blob join)
+  const rs = chunkRows(d, file);
   let line = 1;
   for (const r of rs) { const loc = r.content.split('\n').length; d.prepare('UPDATE chunks SET start_line=?, end_line=? WHERE file=? AND idx=?').run(line, line + loc - 1, file, r.idx); line += loc; }
   const text = rs.map((r) => r.content).join('\n');

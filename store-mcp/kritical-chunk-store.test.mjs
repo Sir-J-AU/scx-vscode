@@ -1,7 +1,15 @@
 // Offline tests for kritical-chunk-store.mjs — chunking + synthetic-context assembly. node --test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import { chunkText, buildContext } from './kritical-chunk-store.mjs';
+
+const CLI = join(dirname(fileURLToPath(import.meta.url)), 'kritical-chunk-store.mjs');
 
 test('chunkText round-trips byte-for-byte (join with newline == original)', () => {
   const src = Array.from({ length: 600 }, (_, i) =>
@@ -49,4 +57,25 @@ test('buildContext focuses by line number too, and falls back to chunk 0', () =>
   assert.deepEqual(byLine.focus, [3]);
   const fallback = buildContext(rows, 'no-such-symbol-anywhere', 8000);
   assert.deepEqual(fallback.focus, [0]);
+});
+
+test('content-addressed dedup: identical chunk bodies stored once + round-trip byte-safe', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dedup-'));
+  const db = join(dir, 's.db');
+  const fx = join(dir, 'dup.js');
+  const blk = 'function same(a,b){\n' + Array.from({ length: 30 }, (_, j) => `  const x${j}=a+${j}*b;`).join('\n') + '\n  return x0;\n}';
+  writeFileSync(fx, Array(4).fill(blk).join('\n\n') + '\n'); // 4 IDENTICAL chunks
+  try {
+    const r = spawnSync(process.execPath, [CLI, 'chunk', fx], { env: { ...process.env, KRIT_CHUNK_STORE: db }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    const d = new DatabaseSync(db);
+    const chunks = d.prepare('SELECT COUNT(*) n FROM chunks').get().n;
+    const blobs = d.prepare('SELECT COUNT(*) n FROM blobs').get().n;
+    d.close();
+    assert.ok(chunks >= 4, `expected >=4 chunks, got ${chunks}`);
+    assert.ok(blobs < chunks, `blobs (${blobs}) must be fewer than chunks (${chunks}) — content-addressed dedup`);
+    const out = join(dir, 'out.js');
+    spawnSync(process.execPath, [CLI, 'reassemble', fx, out], { env: { ...process.env, KRIT_CHUNK_STORE: db } });
+    assert.equal(readFileSync(out, 'utf8'), readFileSync(fx, 'utf8'), 'reassembly byte-identical after dedup');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

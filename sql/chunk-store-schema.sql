@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS ix_chunks_file ON chunks(file);
 CREATE INDEX IF NOT EXISTS ix_chunks_sym  ON chunks(symbols);
 
+-- .5231 6502 content-addressing: each UNIQUE chunk body is stored ONCE, keyed by its SHA-256. Chunk rows
+-- carry the sha reference and NULL content; reads materialise content via LEFT JOIN blobs ON blobs.sha=chunks.sha.
+-- Identical chunks (repeated boilerplate, or unchanged chunks across file versions) cost one blob, not N.
+CREATE TABLE IF NOT EXISTS blobs (
+  sha      TEXT PRIMARY KEY,   -- SHA-256 of the content
+  content  TEXT                -- the unique chunk body (SQL Server: VARBINARY via COMPRESS() for gzip tiering)
+);
+
 -- SQL Server (dbo.*) equivalent — the server-side warehouse (KriticalSCXCodeStore):
 --   IF OBJECT_ID('dbo.ChunkFile') IS NULL CREATE TABLE dbo.ChunkFile(
 --     file NVARCHAR(500) PRIMARY KEY, lang VARCHAR(12), loc INT, sha CHAR(64),
