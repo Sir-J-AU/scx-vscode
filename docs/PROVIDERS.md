@@ -2,6 +2,15 @@
 
 Probed via `GET https://api.scx.ai/v1/models` with Ben SCX key. All prices in AUD.
 
+> **This is the STATIC catalog** (context/pricing/features as the API reports them). For the
+> **empirical BEHAVIORAL companion** — how each model actually performs on a real structured-output
+> task (reasoning-token overhead, JSON reliability, correctness, and the routing rule for which model
+> to use when) — see [SCX-MODEL-BEHAVIOR-PROBE.md](SCX-MODEL-BEHAVIOR-PROBE.md) (`.5187`, refresh via
+> `lens/Invoke-KritScxModelBehaviorProbe.py`). Key finding: the 'json_mode' flag below does not tell
+> you that reasoning-mode models (MiniMax/coder/MAGPiE/gpt-oss) consume output budget on thinking that
+> scales with input size — under a tight `max_tokens` they can silently return empty on large inputs,
+> while the zero-reasoning models (DeepSeek/Llama/gemma/Qwen) are the safe pick for bounded extraction.
+
 ## Chat / instruct models
 
 | Model | Context | Max out | AUD/1M in | AUD/1M out | HF ID | Datacenters | Features | Notes |
