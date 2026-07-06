@@ -8,6 +8,7 @@ Date: 2026-07-06 Australia/Sydney
 - `documentation\ai\2026-07-06\scxcodex-pack\SCXCODEX-DEDICATED-SUBPROJECT-PLAN-2026-07-06.md`
 - `documentation\ai\2026-07-06\scxcodex-pack\SCXCODEX-FULL-ARCHITECTURE-HANDOVER-2026-07-06.md`
 - `docs\AGENTMUX.md`
+- `docs\AGENTMUX-RUST-DESIGN.md`
 - `docs\MUX.md`
 
 ## Built Artifact

@@ -59,6 +59,8 @@ Use the hybrid path:
 
 A lot of AgentMUX belongs in Rust once the control-plane shape is proven. The wrapper is the fast proof path; Rust is the durable product path for anything that must be deterministic, secure, high-throughput, or tightly integrated with the Codex harness.
 
+The detailed Rust module/import/overlay plan lives in `docs/AGENTMUX-RUST-DESIGN.md`.
+
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                         Kritical.SCXCodex Rust Core                          │

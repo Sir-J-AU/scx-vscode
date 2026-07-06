@@ -34,6 +34,10 @@ pwsh ./codex-wrapper/pack/Update-Codex.ps1
 
 That command pulls the upstream source clone, reapplies the branding overlay in a disposable worktree, recompiles, packages, and verifies the branded binary. It does not install or mutate stock `codex`.
 
+## AgentMUX Rust Plan
+
+`docs/AGENTMUX-RUST-DESIGN.md` defines the next overlay step: keep upstream Codex intact where possible, add Kritical Rust modules for SQL-backed memory, empirical model routing, prompt manifests, context paging, SCX-only transport, audit events, worktree scheduling, and JSON output contracts, then patch only stable upstream seams.
+
 ## Verify
 
 ```powershell
