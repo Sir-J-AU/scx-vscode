@@ -47,6 +47,34 @@ AgentMUX is a SQL-backed context-switching and memory-management harness for cod
 └──────────────────────────────┘   └───────────────────────────────────────────┘
 ```
 
+## Memory Model
+
+AgentMUX uses context engineering, not prompt stuffing. The model context window is volatile RAM; SQL is durable memory; prompt manifests are page tables; the scheduler is the kernel.
+
+| Memory layer | Examples | Rule |
+|---|---|---|
+| Immutable instruction memory | `AGENTS.md`, coding standards, safety policy, definition of done | Treat as ROM and version/hash it. |
+| Repo semantic memory | files, symbols, functions, routes, tables, tests, call graph | Query it; do not dump the repo. |
+| Task memory | objective, task card, status, assigned model, worktree, risks | Every agent gets a job card. |
+| Episodic memory | tool output, test failures, human corrections, sister-agent events | Append-only audit log. |
+| Distilled project memory | stable decisions, verified facts, reusable patterns, known pitfalls | Typed summaries with provenance. |
+| Working context | active prompt payload | Temporary; write useful facts back to SQL. |
+
+Core OS analogies:
+
+```text
+Bank switching       -> swap role/task context banks into the prompt
+Paging               -> load only relevant slices from SQL
+Interrupts           -> react to tests, tools, humans, stale summaries, budget limits
+DMA                  -> bulk indexing/summarisation outside the main model loop
+ROM routines         -> immutable policies, prompt contracts, project rules
+Page table           -> prompt manifest showing what loaded and why
+Bus arbitration      -> scheduler leases for files/tools/models/tokens
+Cache invalidation   -> mark summaries stale after source hash changes
+Write-back cache     -> stage findings before durable memory promotion
+Process table        -> active agent registry with role/status/model/cost/output
+```
+
 ## Integration Strategy
 
 Use the hybrid path:

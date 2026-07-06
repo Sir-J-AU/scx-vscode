@@ -33,6 +33,69 @@ Supervisor mode                     Human approval / merge arbiter
 
 The design rule is simple: **context is volatile RAM; SQL is durable memory; prompts are deterministic pages loaded from SQL with provenance.**
 
+## Agent-System Equivalents
+
+| Old system concept | AgentMUX equivalent | Implementation point |
+|---|---|---|
+| Bank switching | Swap a model's active context between task-specific memory banks | `context` packs role/task banks per manifest |
+| Paging | Pull only relevant repo/docs/task-history slices into prompt RAM | `context_pages`, `prompt_manifest_pages` |
+| Interrupts | Events from sister agents, tools, tests, commits, and humans | `AgentInterrupt`, `agent_events` |
+| DMA | Bulk retrieval/indexing/summarisation outside the main loop | `DmaWriter`, indexer, summariser |
+| ROM routines | Immutable project rules, `AGENTS.md`, standards, safety policy | `RomOverlay`, prompt contracts, checked-in docs |
+| RAM | Active prompt/context window | `ActiveContext` |
+| Disk | SQL/object/vector store | `MemoryStore` |
+| Page table | Retrieval manifest showing what was loaded and why | `prompt_manifests`, `prompt_manifest_items` |
+| Bus arbitration | Scheduler assigns work, tools, tokens, budgets, leases | `BusArbiter`, `Lease` |
+| Cache invalidation | Detect stale summaries after code changes | `summary_dependencies`, file hashes |
+| Write-back cache | Stage findings before committing to shared memory | summariser flush from events to `memory_items` |
+| Process table | Agent registry: role, task, status, context bank, model, costs, outputs | `agent_runs`, `agent_run_leases` |
+
+### Process Table
+
+The process table is the operating-system view of sister agents. It prevents "parallel chats" from becoming invisible state.
+
+```sql
+CREATE TABLE agent_runs (
+  agent_run_id TEXT PRIMARY KEY,
+  parent_task_id TEXT,
+  task_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  prompt_manifest_id TEXT,
+  context_bank TEXT,
+  worktree_path TEXT,
+  token_budget INTEGER,
+  tokens_used INTEGER DEFAULT 0,
+  cost_estimate REAL,
+  started_at TEXT,
+  stopped_at TEXT,
+  exit_reason TEXT,
+  output_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_run_leases (
+  agent_run_id TEXT NOT NULL,
+  lease_id TEXT NOT NULL,
+  resource_kind TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  PRIMARY KEY (agent_run_id, lease_id)
+);
+```
+
+Example live view:
+
+```text
+PID   ROLE      MODEL          STATE       BANK        MANIFEST  LEASES
+A101  planner   MiniMax-M2.7   completed   planner     M501      -
+A102  scout     Qwen3-32B      completed   scout-auth  M502      read:auth/*
+A103  coder     DeepSeek-V3.1  running     coder-auth  M503      write:src/auth.ts
+A104  reviewer  MiniMax-M2.7   waiting     reviewer    -         waits:A103
+```
+
 ## Current External Research Signals
 
 Primary-source patterns to steal deliberately:
@@ -154,9 +217,12 @@ Tables:
 
 - `files`
 - `symbols`
+- `agents`
+- `models`
 - `memory_items`
 - `tasks`
 - `prompt_manifests`
+- `prompt_manifest_items`
 - `agent_events`
 - `tool_events`
 - `patches`
@@ -164,8 +230,160 @@ Tables:
 - `model_eval_results`
 - `context_pages`
 - `summary_dependencies`
+- `agent_runs`
+- `agent_run_leases`
 
 Use SQL as source of truth. Vector search can be added later as an index table, not authority.
+
+### Baseline SQL Control Plane
+
+This is the first serious schema target. Keep it SQLite-portable, then mirror to SQL Server/Postgres.
+
+```sql
+CREATE TABLE agents (
+    agent_id            TEXT PRIMARY KEY,
+    name                TEXT NOT NULL,
+    role                TEXT NOT NULL,
+    default_model       TEXT NOT NULL,
+    max_context_tokens  INTEGER NOT NULL,
+    max_parallel_tasks  INTEGER NOT NULL,
+    trust_level         TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE models (
+    model_id            TEXT PRIMARY KEY,
+    provider            TEXT NOT NULL,
+    model_name          TEXT NOT NULL,
+    context_tokens      INTEGER,
+    supports_tools      INTEGER NOT NULL DEFAULT 0,
+    supports_json       INTEGER NOT NULL DEFAULT 0,
+    supports_reasoning  INTEGER NOT NULL DEFAULT 0,
+    cost_input_per_m    REAL,
+    cost_output_per_m   REAL,
+    latency_class       TEXT,
+    coding_score_note   TEXT,
+    active              INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE tasks (
+    task_id             TEXT PRIMARY KEY,
+    parent_task_id      TEXT REFERENCES tasks(task_id),
+    title               TEXT NOT NULL,
+    objective           TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    priority            INTEGER NOT NULL DEFAULT 100,
+    assigned_agent_id   TEXT REFERENCES agents(agent_id),
+    model_id            TEXT REFERENCES models(model_id),
+    repo_id             TEXT,
+    branch_name         TEXT,
+    worktree_path       TEXT,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE memory_items (
+    memory_id           TEXT PRIMARY KEY,
+    memory_type         TEXT NOT NULL,
+    scope               TEXT NOT NULL,
+    title               TEXT NOT NULL,
+    body                TEXT NOT NULL,
+    source_type         TEXT NOT NULL,
+    source_ref          TEXT NOT NULL,
+    confidence          REAL NOT NULL DEFAULT 0.5,
+    freshness           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    stale               INTEGER NOT NULL DEFAULT 0,
+    created_by_agent_id TEXT REFERENCES agents(agent_id),
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE repo_files (
+    file_id             TEXT PRIMARY KEY,
+    repo_id             TEXT NOT NULL,
+    path                TEXT NOT NULL,
+    content_hash        TEXT NOT NULL,
+    language            TEXT,
+    size_bytes          INTEGER,
+    last_seen_commit    TEXT,
+    last_indexed_at     TEXT,
+    UNIQUE(repo_id, path)
+);
+
+CREATE TABLE code_symbols (
+    symbol_id           TEXT PRIMARY KEY,
+    repo_id             TEXT NOT NULL,
+    file_id             TEXT REFERENCES repo_files(file_id),
+    symbol_type         TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    qualified_name      TEXT,
+    start_line          INTEGER,
+    end_line            INTEGER,
+    signature           TEXT,
+    content_hash        TEXT
+);
+
+CREATE TABLE prompt_manifests (
+    manifest_id         TEXT PRIMARY KEY,
+    task_id             TEXT REFERENCES tasks(task_id),
+    agent_id            TEXT REFERENCES agents(agent_id),
+    model_id            TEXT REFERENCES models(model_id),
+    prompt_hash         TEXT NOT NULL,
+    estimated_tokens    INTEGER,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE prompt_manifest_items (
+    manifest_id         TEXT REFERENCES prompt_manifests(manifest_id),
+    item_type           TEXT NOT NULL,
+    item_ref            TEXT NOT NULL,
+    reason_loaded       TEXT NOT NULL,
+    token_estimate      INTEGER,
+    rank_score          REAL,
+    PRIMARY KEY (manifest_id, item_type, item_ref)
+);
+
+CREATE TABLE agent_events (
+    event_id            TEXT PRIMARY KEY,
+    task_id             TEXT REFERENCES tasks(task_id),
+    agent_id            TEXT REFERENCES agents(agent_id),
+    event_type          TEXT NOT NULL,
+    event_body          TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE test_runs (
+    test_run_id         TEXT PRIMARY KEY,
+    task_id             TEXT REFERENCES tasks(task_id),
+    command             TEXT NOT NULL,
+    exit_code           INTEGER,
+    stdout              TEXT,
+    stderr              TEXT,
+    duration_ms         INTEGER,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE patches (
+    patch_id            TEXT PRIMARY KEY,
+    task_id             TEXT REFERENCES tasks(task_id),
+    agent_id            TEXT REFERENCES agents(agent_id),
+    base_commit         TEXT NOT NULL,
+    diff_text           TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    reviewer_agent_id   TEXT REFERENCES agents(agent_id),
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Memory Layers
+
+| Layer | Purpose | Stored as |
+|---|---|---|
+| Immutable instruction memory | Product goals, repo rules, `AGENTS.md`, safety policy, definition of done | ROM overlays, checked-in docs, prompt contract hashes |
+| Repo semantic memory | Files, symbols, functions, routes, tables, tests, call/dependency graph, churn | `repo_files`, `code_symbols`, `context_pages` |
+| Task memory | Objective, status, scope, files touched, risks, next tasks | `tasks`, `agent_runs` |
+| Episodic agent memory | What happened during a run: attempts, failures, corrections, tool outputs | append-only `agent_events` |
+| Distilled project memory | Stable patterns, decisions, pitfalls, verified facts | typed `memory_items` |
+| Working context | Actual prompt payload for one call | `prompt_manifests` + loaded pages |
 
 ### `context`
 
@@ -359,6 +577,41 @@ Concurrency controls:
 - Backoff on HTTP failures/rate limits.
 - Stop spawning when marginal benchmark score drops.
 
+Scheduler responsibilities:
+
+- Decide which tasks can run in parallel.
+- Decide which model should handle each task.
+- Decide which context bank to load.
+- Decide whether a result needs review.
+- Decide whether summaries need regeneration.
+- Decide whether a task should be split further.
+- Decide whether a patch can be merged.
+- Decide whether the human must be interrupted.
+
+Initial routing baseline:
+
+| Task type | Default role | Preferred features | Cold-start model order | Notes |
+|---|---|---|---|---|
+| Planning / decomposition | Planner | reasoning, JSON | `MiniMax-M2.7`, `DeepSeek-V3.1` | Must output bounded task cards, not prose. |
+| Repo exploration | Repo Scout | large context, low cost | `gemma-4-31B-it`, `Qwen3-32B`, `DeepSeek-V3.1` | Read-only; many can run in parallel. |
+| Code patching | Coder | coding quality, tools | `DeepSeek-V3.1`, `MiniMax-M2.7`, `gpt-oss-120b` | Isolated worktree and file leases required. |
+| Structured extraction | Scout/Summariser | strict JSON | `MiniMax-M2.7`, `Qwen3-32B` | Reject invalid JSON; do not trust partial prose. |
+| Security review | Reviewer | reasoning, long context | `MiniMax-M2.7`, `gpt-oss-120b`, `DeepSeek-V3.1` | Higher priority than coder continuation. |
+| Test failure repair | Coder | local context, tools | `DeepSeek-V3.1`, `MiniMax-M2.7` | Load failing logs via interrupt/page fault. |
+| Memory summarisation | Summariser | JSON, compression | `MiniMax-M2.7`, `Qwen3-32B`, `gemma-4-31B-it` | Writes typed memory only after validation. |
+| Merge arbitration | Merge Arbiter | reasoning, policy | `MiniMax-M2.7` | Requires tests or explicit override. |
+| Benchmarking | Bench Runner | deterministic output | all candidates | Writes `model_eval_results`; no code mutation. |
+
+Routing is empirical after cold-start:
+
+```text
+1. Filter by required features and safety policy.
+2. Rank by latest `model_eval_results` for task_type/benchmark_name.
+3. Apply concurrency/rate-limit budget.
+4. Prefer cheaper model only when quality score is within configured tolerance.
+5. Record latency/cost/failure back into the control plane.
+```
+
 ### `worktree`
 
 Purpose: isolate code-writing agents.
@@ -511,4 +764,3 @@ and known pitfalls. Include provenance and dependency hashes.
 - SWE-agent: https://arxiv.org/abs/2405.15793
 - AgentMUX executable prototype: `mux/Invoke-KritScxMuxMatrix.py`
 - SCXCodex pack builder: `codex-wrapper/pack/Build-KriticalSCXCodex.ps1`
-
