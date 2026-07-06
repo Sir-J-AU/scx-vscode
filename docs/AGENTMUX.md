@@ -55,6 +55,58 @@ Use the hybrid path:
 2. **Instrument everything**: persist tasks, prompts, responses, tool calls, patches, tests, benchmark results, and stale-summary state.
 3. **Fork only proven harness pieces**: once the wrapper shows which context-assembly or scheduling seams need deeper ownership, move those specific pieces into the Kritical.SCXCodex fork.
 
+## Rust Ownership Path
+
+A lot of AgentMUX belongs in Rust once the control-plane shape is proven. The wrapper is the fast proof path; Rust is the durable product path for anything that must be deterministic, secure, high-throughput, or tightly integrated with the Codex harness.
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         Kritical.SCXCodex Rust Core                          │
+│                                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────────────────┐  │
+│  │ Context Packer    │  │ Prompt Manifest  │  │ Secret Redaction / Policy │  │
+│  │ token budgets     │  │ hashes/provenance│  │ no raw secret prompts     │  │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────────┬──────────────┘  │
+│           │                     │                         │                 │
+│           v                     v                         v                 │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────────────────┐  │
+│  │ SQL Memory Client │  │ Model Router     │  │ Agent Scheduler           │  │
+│  │ sqlite/sqlserver  │  │ empirical score  │  │ scoped worktrees/tools    │  │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────────┬──────────────┘  │
+│           │                     │                         │                 │
+│           v                     v                         v                 │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────────────────┐  │
+│  │ SCX API Client    │  │ Audit Event Log  │  │ Merge/Test Arbiter        │  │
+│  │ OpenAI-compatible │  │ append-only      │  │ explicit gates            │  │
+│  └──────────────────┘  └──────────────────┘  └───────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+Recommended split:
+
+| Keep outside first | Move into Rust when proven |
+|---|---|
+| Benchmark task definitions | Context packing and model budget enforcement |
+| Exploratory prompt templates | Prompt manifest hashing/signing |
+| One-off corpus importers | Secret redaction and prompt safety gates |
+| Experimental multi-agent policies | Agent scheduler and worktree lifecycle |
+| Report generation | Audit event writer and merge/test arbiter |
+| Provider/model experiments | SCX-first API client and empirical router |
+
+Rust should own the invariant-bearing path:
+
+1. Read task card and durable memory from SQL.
+2. Recompute file hashes and stale-summary state.
+3. Assemble deterministic context from source IDs.
+4. Redact secrets before prompt assembly.
+5. Write a prompt manifest before any model call.
+6. Route models from `model_eval_results`.
+7. Run each agent with filesystem/tool/network scope.
+8. Persist every response, tool call, patch, test, and summary.
+9. Refuse merge without tests or explicit override.
+
+Do not move the whole experiment into Rust at once. First stabilise the Python/PowerShell/Node wrapper as the executable spec, then port the invariant-bearing pieces into `Kritical.SCXCodex.exe` module-by-module so upstream Codex updates remain mergeable.
+
 ## Empirical Model Routing
 
 Model capability is measured, not marketing-defined. The control plane stores benchmark outputs in `model_eval_results`:
@@ -164,4 +216,3 @@ agentmux memory rebuild
 - `mux/Invoke-KritScxSyntheticContext.py`: single-model multi-lens proof, defaults to `MiniMax-M2.7`, five lenses, SQL Server context retrieval, `reasoning_content` fallback.
 - `sql/chunk-store-schema.sql`: portable `model_eval_results` table plus SQL Server equivalent notes.
 - `mux/Invoke-KritScxMuxMatrix.test.py`: offline tests for model count, MiniMax headroom, scoring, empirical routing, SQL hex decoding, and reasoning fallback.
-

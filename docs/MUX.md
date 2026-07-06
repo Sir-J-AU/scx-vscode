@@ -29,6 +29,8 @@ The Kritical SCX mux system answers questions about the SCX codebase by groundin
 
 HR1: every call in this stack uses `SCX_API_KEY` only — no OpenAI key, no Anthropic key, no other provider key.
 
+The long-term product path is documented in `docs/AGENTMUX.md`: keep the wrapper as the executable spec, then move invariant-bearing pieces into the Rust `Kritical.SCXCodex.exe` core once proven.
+
 ---
 
 ## 2. Local SQLite Store (`kritical-local-store.mjs`)
