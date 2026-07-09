@@ -14,6 +14,7 @@ import * as vscode from 'vscode';
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { spawn, execFileSync } from 'child_process';
 import * as tomlLib from '@iarna/toml';
 
@@ -94,6 +95,7 @@ function getConfig() {
     sqliteStorePath: c.get<string>('sqliteStorePath', ''),
     mssqlServer: c.get<string>('mssqlServer', '.\\SQLEXPRESS'),
     mssqlDatabase: c.get<string>('mssqlDatabase', 'KriticalSCXCodeStore'),
+    modelCatalogPath: c.get<string>('modelCatalogPath', 'C:\\KriticalSCX\\config\\models\\scx-model-catalog.json'),
     // .5165e — auto-context wiring
     autoContext: c.get<'off' | 'file' | 'file+selection' | 'workspace-tree'>('autoContext', 'file+selection'),
     autoContextMaxChars: c.get<number>('autoContextMaxChars', 8000),
@@ -143,10 +145,29 @@ function modelTempSrc(id: string): string {
 // If the fetch fails we use the cache; if no cache, the hardcoded SCX_MODEL_CATALOG (preseed).
 let _liveModels: ScxModel[] | null = null;
 const _modelsCachePath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'models-cache.json');
+const _modelsFullCatalogPath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'models-catalog.full.json');
+const _installModelCatalogPath = 'C:\\KriticalSCX\\config\\models\\scx-model-catalog.json';
+const _installModelCatalogHistoryDir = 'C:\\KriticalSCX\\config\\models\\history';
 const _modelsCacheBak = _modelsCachePath + '.bak';
+function safeSlug(value: string): string {
+  return String(value || 'unknown').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'unknown';
+}
+function configuredModelCatalogPath(): string {
+  const raw = vscode.workspace.getConfiguration('kritical.scxcode').get<string>('modelCatalogPath', _installModelCatalogPath);
+  return raw && raw.trim() ? raw.trim() : _installModelCatalogPath;
+}
+function modelCatalogCandidates(): string[] {
+  const configured = configuredModelCatalogPath();
+  return Array.from(new Set([
+    configured,
+    configured + '.bak',
+    _modelsFullCatalogPath,
+    _modelsFullCatalogPath + '.bak',
+  ].filter(Boolean)));
+}
 // .5228 — atomic + idempotent + backup write for ANY API-derived cache (never leave a half-written or
 // empty cache that could blank the dropdown). Write temp file -> validate -> rotate current to .bak -> rename.
-function writeCacheAtomic(pathTarget: string, data: any): void {
+function writeCacheAtomic(pathTarget: string, data: any, historyDetail?: string): void {
   try {
     const json = JSON.stringify(data);
     if (!json || json === '[]' || json === 'null') { return; }        // never persist an empty/blank cache
@@ -154,9 +175,38 @@ function writeCacheAtomic(pathTarget: string, data: any): void {
     fs.mkdirSync(path.dirname(pathTarget), { recursive: true });
     fs.writeFileSync(tmp, json);
     JSON.parse(fs.readFileSync(tmp, 'utf8'));                          // validate round-trip before committing
-    if (fs.existsSync(pathTarget)) { try { fs.copyFileSync(pathTarget, pathTarget + '.bak'); } catch { /* best effort */ } }
+    if (fs.existsSync(pathTarget)) {
+      try { fs.copyFileSync(pathTarget, pathTarget + '.bak'); } catch { /* best effort */ }
+      if (historyDetail) {
+        try {
+          fs.mkdirSync(_installModelCatalogHistoryDir, { recursive: true });
+          const stamp = new Date().toISOString().replace(/[:.]/g, '').replace('T', 'T').replace('Z', 'Z');
+          const hist = path.join(_installModelCatalogHistoryDir, `${safeSlug('scx')}-${safeSlug(historyDetail)}-${stamp}.previous.json`);
+          fs.copyFileSync(pathTarget, hist);
+        } catch { /* best effort */ }
+      }
+    }
     fs.renameSync(tmp, pathTarget);
   } catch { /* keep prior cache */ }
+}
+function writeModelCatalogCache(rows: any[], source: string, statusCode?: number): void {
+  if (!Array.isArray(rows) || !rows.length) { return; }
+  const chatRows = rows.filter((r: any) => !NON_CHAT_MODEL.test(String((typeof r === 'string') ? r : (r?.id || r?.model || r?.name || ''))));
+  const payload = {
+    captured_utc: new Date().toISOString(),
+    provider: 'scx',
+    server: 'scx',
+    source,
+    status: statusCode || null,
+    count: rows.length,
+    chat_count: chatRows.length,
+    canonical_path: configuredModelCatalogPath(),
+    mirror_path: _modelsFullCatalogPath,
+    backup_history_dir: _installModelCatalogHistoryDir,
+    models: rows,
+  };
+  writeCacheAtomic(configuredModelCatalogPath(), payload, 'models-catalog');
+  writeCacheAtomic(_modelsFullCatalogPath, payload, 'models-catalog-user-mirror');
 }
 // read a cache with fallback to its .bak, then to null (caller falls back to preseed) — never throws.
 function readCacheOrBak(pathTarget: string): ScxModel[] | null {
@@ -187,10 +237,26 @@ function healTemps(list: ScxModel[]): ScxModel[] {
 // appear in the chat picker — selecting one was the root cause of the "Unsupported model" error.
 const NON_CHAT_MODEL = /(embed|e5-mistral|whisper|opir|moderation|rerank|guard)/i;
 function isChatModel(m: ScxModel): boolean { return !NON_CHAT_MODEL.test(m.id); }
+function rowsToScxModels(rows: any[]): ScxModel[] {
+  const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
+  return rows.map((r: any) => {
+    const id = typeof r === 'string' ? r : (r?.id || r?.model || r?.name);
+    if (!id) { return null; }
+    const k = known.get(String(id).toLowerCase());
+    const apiTemp = (typeof r === 'object') ? (r.default_temperature ?? r.temperature ?? (r.params && r.params.temperature)) : undefined;
+    if (typeof apiTemp === 'number') { return { id: String(id), detail: k ? k.detail : 'live', temp: apiTemp, tempSrc: 'api' }; }
+    return { id: String(id), detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK, tempSrc: k ? (k.tempSrc || 'def') : 'def' };
+  }).filter(Boolean) as ScxModel[];
+}
 function getModelCatalog(): ScxModel[] {
   let list: ScxModel[];
   if (_liveModels && _liveModels.length) { list = healTemps(_liveModels); }
-  else { const cached = readCacheOrBak(_modelsCachePath); list = cached ? healTemps(cached) : SCX_MODEL_CATALOG; }
+  else {
+    const fullRows = readFullModelRows();
+    const fullModels = fullRows.length ? rowsToScxModels(fullRows) : [];
+    const cached = fullModels.length ? fullModels : readCacheOrBak(_modelsCachePath);
+    list = cached ? healTemps(cached) : SCX_MODEL_CATALOG;
+  }
   const chat = list.filter(isChatModel);
   return chat.length ? chat : SCX_MODEL_CATALOG.filter(isChatModel); // never blank the dropdown
 }
@@ -205,6 +271,89 @@ function normalizeModelId(id: string): string {
   const ci = cat.find((m) => m.id.toLowerCase() === (id || '').toLowerCase());
   if (ci) { return ci.id; }
   return cat.length ? cat[0].id : id; // last resort — a known-good chat model
+}
+
+function readFullModelRows(): any[] {
+  for (const p of modelCatalogCandidates()) {
+    try {
+      if (!fs.existsSync(p)) { continue; }
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const rows = Array.isArray(parsed) ? parsed : parsed.models;
+      if (Array.isArray(rows) && rows.length) { return rows; }
+    } catch { /* try next */ }
+  }
+  return [];
+}
+
+function modelContextTokens(id: string): number {
+  const rows = readFullModelRows();
+  const row = rows.find((m: any) => String(m?.id || m?.model || m?.name || '').toLowerCase() === String(id || '').toLowerCase());
+  const candidates = row ? [
+    row.context_length, row.context_window, row.context, row.max_context_length,
+    row.max_input_tokens, row.input_token_limit, row.input_tokens,
+  ] : [];
+  const live = candidates.map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0);
+  if (live) { return live; }
+  const known: Record<string, number> = {
+    'minimax-m2.7': 192000,
+    'coder': 196000,
+    'gpt-oss-120b': 131000,
+    'deepseek-v3.1': 131000,
+    'magpie': 131000,
+    'gemma-4-31b-it': 131000,
+    'meta-llama-3.3-70b-instruct': 131000,
+    'llama-4-maverick-17b-128e-instruct': 131000,
+    'qwen3-32b': 32000,
+  };
+  return known[String(id || '').toLowerCase()] || 108000;
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(String(text || '').length / 4);
+}
+
+function summarizeForCompaction(messages: ScxMessage[]): string {
+  return messages.map((m, i) => {
+    const compact = m.content.replace(/\s+/g, ' ').trim().slice(0, 700);
+    return `${i + 1}. ${m.role}: ${compact}${m.content.length > 700 ? ' ...' : ''}`;
+  }).join('\n');
+}
+
+function compactMessagesForSend(history: ScxMessage[], model: string, extraChars = 0):
+    { messages: ScxMessage[]; compactedTurns: number } {
+  const cfg = getConfig();
+  if (cfg.autocompact === 'off' || history.length < 9) {
+    return { messages: [...history], compactedTurns: 0 };
+  }
+  const contextTokens = modelContextTokens(model);
+  const threshold = cfg.autocompact === 'aggressive' ? 0.50 : 0.72;
+  const reserve = Math.max(cfg.maxTokens + 1500, 3500);
+  const budget = Math.max(4000, Math.floor(contextTokens * threshold) - reserve);
+  const estimated = history.reduce((sum, m) => sum + estimateTokens(m.content), 0) + estimateTokens('x'.repeat(extraChars));
+  if (estimated <= budget) {
+    return { messages: [...history], compactedTurns: 0 };
+  }
+
+  const keep = cfg.autocompact === 'aggressive' ? 5 : 7; // odd count keeps user/assistant alternation after summary pair
+  const recent = history.slice(-keep);
+  const old = history.slice(0, Math.max(0, history.length - keep));
+  if (!old.length) {
+    return { messages: [...history], compactedTurns: 0 };
+  }
+  const summary = [
+    '## Kritical SCXCode Auto-Context Flush',
+    `Compacted ${old.length} earlier turns locally before sending to avoid resending stale full history.`,
+    'Preserve decisions, constraints, file names, commands, errors, and current objective from this summary:',
+    summarizeForCompaction(old),
+  ].join('\n');
+  return {
+    messages: [
+      { role: 'user', content: summary },
+      { role: 'assistant', content: 'Acknowledged. I will treat the compacted prior-context summary as the earlier conversation state.' },
+      ...recent,
+    ],
+    compactedTurns: old.length,
+  };
 }
 
 // .5231 — publish the currently-selected model to a shared file the codex wrapper reads, so
@@ -253,18 +402,14 @@ function fetchLiveModels(): void {
         try {
           const j = JSON.parse(buf);
           const rows: any[] = Array.isArray(j.data) ? j.data : (Array.isArray(j.models) ? j.models : []);
-          const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
-          const next: ScxModel[] = rows.map((r: any) => {
-            const id = typeof r === 'string' ? r : (r.id || r.model || r.name);
-            if (!id) { return null; }
-            const k = known.get(String(id).toLowerCase());
-            // .5228 — honour a temperature the API itself advertises (default_temperature / temperature /
-            // params.temperature) — that is authoritative over our hardcoded guess.
-            const apiTemp = (typeof r === 'object') ? (r.default_temperature ?? r.temperature ?? (r.params && r.params.temperature)) : undefined;
-            if (typeof apiTemp === 'number') { return { id, detail: k ? k.detail : 'live', temp: apiTemp, tempSrc: 'api' }; }
-            return { id, detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK, tempSrc: k ? (k.tempSrc || 'def') : 'def' };
-          }).filter(Boolean) as ScxModel[];
-          if (next.length) { _liveModels = next; writeCacheAtomic(_modelsCachePath, next); }  // only replace on a non-empty fetch
+          // .5228 — honour a temperature the API itself advertises (default_temperature / temperature /
+          // params.temperature) — that is authoritative over our hardcoded guess.
+          const next: ScxModel[] = rowsToScxModels(rows);
+          if (next.length) {
+            _liveModels = next;
+            writeCacheAtomic(_modelsCachePath, next); // reduced picker cache
+            writeModelCatalogCache(rows, `vscode-extension:${url.href}`, res.statusCode); // full-fidelity API metadata
+          }  // only replace on a non-empty fetch
         } catch { /* keep cache/preseed — dropdown never blanks */ }
       });
     });
@@ -453,9 +598,9 @@ async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, k
   if (!useKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
   model = normalizeModelId(model);       // .5231 — match the endpoint's exact id (direct vs proxy casing)
   publishCurrentModel(model);            // .5231 — share the live model with the codex wrapper
-  // .5231 (bughunt-confirmed) — clamp to SCX's proven [0,2] ceiling so an out-of-range config/slider
-  // value can't produce a hard 400 from the endpoint.
-  const temp = Math.max(0, Math.min(2, Number.isFinite(temperature) ? temperature : 0.2));
+  // .5231 (bughunt-confirmed) — clamp to SCX's OpenAI-compatible safe [0,1] range so an
+  // out-of-range config/slider value can't produce a hard 400 from the endpoint.
+  const temp = Math.max(0, Math.min(1, Number.isFinite(temperature) ? temperature : 0.2));
   const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens, temperature: temp };
   if (systemPrompt) body.system = systemPrompt;
 
@@ -666,17 +811,11 @@ async function cmdTestConnection() {
 
 async function cmdPickModel() {
   const cfg = getConfig();
-  const catalog: Array<{ label: string; description: string; detail: string }> = [
-    { label: 'MiniMax-M2.7', description: '192K ctx · default agentic', detail: '230B sparse MoE (10B active) — AUD $0.68 in / $3.20 out per 1M' },
-    { label: 'MAGPiE',        description: '131K ctx · near o4-mini reasoning', detail: '117B MoE from scx.ai — AUD $0.75 in / $1.75 out per 1M' },
-    { label: 'gpt-oss-120b',  description: '131K ctx · cheapest reasoner',      detail: '117B open-weight MoE — AUD $0.30 in / $0.98 out per 1M' },
-    { label: 'DeepSeek-V3.1', description: '131K ctx · reserve for hard problems', detail: '671B MoE (37B active) — AUD $4.50 in / $7.25 out per 1M' },
-    { label: 'coder',          description: '196K ctx · algorithms + debugging', detail: 'SCX coder — AUD $0.85 in / $3.75 out per 1M' },
-    { label: 'gemma-4-31B-it', description: '131K ctx · multimodal + thinking',  detail: 'Google Gemma 4 31B — AUD $0.54 in / $1.63 out per 1M' },
-    { label: 'Llama-4-Maverick-17B-128E-Instruct', description: '131K ctx · multimodal', detail: 'Llama 4 Maverick 400B MoE — AUD $0.95 in / $2.90 out per 1M' },
-    { label: 'Meta-Llama-3.3-70B-Instruct', description: '131K ctx · dense',      detail: '70B → 405B-class perf — AUD $0.95 in / $1.95 out per 1M' },
-    { label: 'Qwen3-32B',     description: '32K ctx · 119 languages',            detail: 'Qwen3 32B dense — AUD $0.65 in / $1.55 out per 1M' },
-  ];
+  const catalog: Array<{ label: string; description: string; detail: string }> = getModelCatalog().map((m) => ({
+    label: m.id,
+    description: `${modelContextTokens(m.id).toLocaleString()} ctx · ${m.detail || 'live catalog'}`,
+    detail: `temperature ${m.temp} (${m.tempSrc || 'def'}) · source ${configuredModelCatalogPath()}`,
+  }));
   const picked = await vscode.window.showQuickPick(catalog, {
     title: 'Kritical SCXCode — pick default model',
     placeHolder: `Current: ${cfg.defaultModel}. Pick to change kritical.scxcode.defaultModel.`,
@@ -800,15 +939,20 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       try {
         const cfg = getConfig();
         const ctxPrefix = buildAutoContext() + attached;
-        const messagesForApi: ScxMessage[] = [...history];
+        const compacted = compactMessagesForSend(history, cfg.defaultModel, ctxPrefix.length);
+        const messagesForApi: ScxMessage[] = [...compacted.messages];
         if (ctxPrefix && messagesForApi.length > 0) {
           messagesForApi[messagesForApi.length - 1] = { role: 'user', content: ctxPrefix + msg.text };
         }
         attached = '';
         const { res, modelUsed, keyIndex, shards } = await scxMux(messagesForApi, cfg.concurrency, cfg.maxTokens);
         const replyText = res.content.map((c) => c.text).join('');
+        if (compacted.compactedTurns > 0) {
+          history.length = 0;
+          history.push(...compacted.messages);
+        }
         history.push({ role: 'assistant', content: replyText });
-        panel.webview.postMessage({ type: 'reply', text: replyText, model: modelUsed, keyIndex, shards, tokensIn: res.usage.input_tokens, tokensOut: res.usage.output_tokens, autoContextChars: ctxPrefix.length });
+        panel.webview.postMessage({ type: 'reply', text: replyText, model: modelUsed, keyIndex, shards, tokensIn: res.usage.input_tokens, tokensOut: res.usage.output_tokens, autoContextChars: ctxPrefix.length, compactedTurns: compacted.compactedTurns });
       } catch (e) {
         // .5231 (bughunt-confirmed) — pop the orphaned user turn so a failed send doesn't leave two
         // consecutive user roles in history → next send 400s "roles must alternate" and bricks the chat.
@@ -845,6 +989,7 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
         canSelectMany: !folder, canSelectFiles: !folder, canSelectFolders: folder,
         openLabel: folder ? 'Attach this folder to SCXCode' : 'Attach file(s) to SCXCode',
         title: folder ? 'Select a folder (read recursively)' : 'Select one or more files',
+        defaultUri: getAttachmentDialogDefaultUri(),
       });
       if (picked && picked.length) {
         const { block, fileCount, chars } = await collectAttachments(picked);
@@ -1535,6 +1680,13 @@ function emptyStateHtml(reason, dbPath, backend){
     '<p style="margin-top:14px;color:var(--ink-faint)">SQLite reads files/symbols directly. SQL Server reads byte-exact dbo.LensSource content plus dbo.LensSymbol from KriticalSCXCodeStore.</p>'+
     '</div>';
 }
+
+function getAttachmentDialogDefaultUri(): vscode.Uri {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (workspaceRoot) { return workspaceRoot; }
+  const home = os.homedir();
+  return vscode.Uri.file(home || process.cwd());
+}
 function markStore(state, dim){
   const dot=$('#storeDot'), lbl=$('#storeState');
   if(lbl) lbl.textContent = state;
@@ -1840,7 +1992,7 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
   <button class="adv-btn" id="advBtn" title="Advanced options">⚙</button>
 </div>
 <div class="adv" id="adv">
-  <label title="Sampling temperature (SCX accepts 0–2). The source marker shows whether this is the model's published recommendation (rec), a neutral default when none is published (def), the live API value (api), or your manual override (you).">Temp <input type="range" id="temp" min="0" max="2" step="0.05" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
+  <label title="Sampling temperature (SCX OpenAI-compatible safe range 0–1). The source marker shows whether this is the model's published recommendation (rec), a neutral default when none is published (def), the live API value (api), or your manual override (you).">Temp <input type="range" id="temp" min="0" max="1" step="0.05" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
   <label>Provider <select id="provider"><option value="auto">Auto (SCX→Claude CLI)</option><option value="scx-native">SCX only</option><option value="claude-code-cli">Claude CLI only</option></select></label>
 </div>
 <div class="scx-status" id="scxStatus" title="Live SCX connection status">
@@ -2026,8 +2178,9 @@ window.addEventListener('message', (e) => {
     sessionOutTokens += (m.tokensOut || 0);
     const keyLabel = m.keyIndex > 1 ? ' · key' + m.keyIndex : '';
     const ctxLabel = m.autoContextChars > 0 ? ' · ctx ' + m.autoContextChars + 'c' : '';
+    const compactLabel = m.compactedTurns > 0 ? ' · flushed ' + m.compactedTurns + ' old turns' : '';
     const muxLabel = m.shards > 1 ? ' · 🔀 ' + m.shards + '-stream synthesis' : '';
-    add('assistant', m.text, m.model + keyLabel + muxLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
+    add('assistant', m.text, m.model + keyLabel + muxLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + compactLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
     if (m.model) modelEl.value = m.model;
     send.disabled = false;
   } else if (m.type === 'error') {
@@ -2107,7 +2260,9 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
         try {
           // Prepend auto-context from the active editor + any attached file/repo context.
           const ctx = buildAutoContext() + this._attached;
-          const messagesForApi: ScxMessage[] = [...this._history];
+          const cfg = getConfig();
+          const compacted = compactMessagesForSend(this._history, cfg.defaultModel, ctx.length);
+          const messagesForApi: ScxMessage[] = [...compacted.messages];
           if (ctx && messagesForApi.length > 0) {
             messagesForApi[messagesForApi.length - 1] = {
               role: 'user',
@@ -2115,9 +2270,11 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
             };
           }
           this._attached = ''; // consumed
-          const cfg = getConfig();
           const { res, modelUsed, keyIndex, shards } = await scxMux(messagesForApi, cfg.concurrency, cfg.maxTokens);
           const replyText = res.content.map((c) => c.text).join('');
+          if (compacted.compactedTurns > 0) {
+            this._history = [...compacted.messages];
+          }
           this._history.push({ role: 'assistant', content: replyText });
           view.webview.postMessage({
             type: 'reply',
@@ -2128,6 +2285,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
             tokensIn: res.usage.input_tokens,
             tokensOut: res.usage.output_tokens,
             autoContextChars: ctx.length,
+            compactedTurns: compacted.compactedTurns,
           });
         } catch (e) {
           // .5231 (bughunt-confirmed) — pop the orphaned user turn so a failed send doesn't leave two
@@ -2170,6 +2328,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           canSelectMany: !folder, canSelectFiles: !folder, canSelectFolders: folder,
           openLabel: folder ? 'Attach this folder to SCXCode' : 'Attach file(s) to SCXCode',
           title: folder ? 'Select a folder (read recursively)' : 'Select one or more files',
+          defaultUri: getAttachmentDialogDefaultUri(),
         });
         if (picked && picked.length) {
           const { block, fileCount, chars } = await collectAttachments(picked);
@@ -2328,6 +2487,13 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
         baseUrl: cfg.baseUrl, defaultModel: cfg.defaultModel, apiKeySet: !!cfg.apiKey, keyCount: cfg.apiKeys.length, temperature: cfg.temperature,
         storageBackend: cfg.storageBackend, sqliteStorePath: cfg.sqliteStorePath, sqliteResolvedPath: sqliteLensStorePath(),
         mssqlServer: cfg.mssqlServer, mssqlDatabase: cfg.mssqlDatabase,
+        autoContext: cfg.autoContext, autoContextMaxChars: cfg.autoContextMaxChars, concurrency: cfg.concurrency, maxTokens: cfg.maxTokens,
+        modelCatalogPath: cfg.modelCatalogPath, modelCatalogResolvedPath: configuredModelCatalogPath(),
+      },
+      modelCatalog: {
+        path: configuredModelCatalogPath(),
+        candidates: modelCatalogCandidates(),
+        count: readFullModelRows().length,
       },
       codexConfigPath: codexConfigPath(),
     };
@@ -2363,6 +2529,11 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
         await c.update('sqliteStorePath', m.sqliteStorePath || '', vscode.ConfigurationTarget.Global);
         await c.update('mssqlServer', m.mssqlServer || '.\\SQLEXPRESS', vscode.ConfigurationTarget.Global);
         await c.update('mssqlDatabase', m.mssqlDatabase || 'KriticalSCXCodeStore', vscode.ConfigurationTarget.Global);
+        await c.update('modelCatalogPath', m.modelCatalogPath || _installModelCatalogPath, vscode.ConfigurationTarget.Global);
+        await c.update('autoContext', m.autoContext || 'file+selection', vscode.ConfigurationTarget.Global);
+        await c.update('autoContextMaxChars', Number(m.autoContextMaxChars) || 8000, vscode.ConfigurationTarget.Global);
+        await c.update('concurrency', Number(m.concurrency) || 1, vscode.ConfigurationTarget.Global);
+        await c.update('maxTokens', Number(m.maxTokens) || 1500, vscode.ConfigurationTarget.Global);
         post({ type: 'saved', section: 'scxcode', ok: true });
       } catch (e: any) { post({ type: 'saved', section: 'scxcode', ok: false, error: e.message }); }
     } else if (m.type === 'launchCodex') { vscode.commands.executeCommand('kritical.scxcode.scxCodex'); }
@@ -2465,6 +2636,17 @@ function setupGuiHtml(logoUri: string): string {
       <label>SCX API base URL</label><input id="sx-base" placeholder="https://api.scx.ai">
       <label>Default model</label><select id="sx-model"></select>
       <div class="note" id="sx-model-note"></div>
+      <label>Model catalog JSON</label><input id="sx-catalog-path" placeholder="C:\\KriticalSCX\\config\\models\\scx-model-catalog.json">
+      <div class="note" id="sx-catalog-note"></div>
+      <label>Auto-context</label><select id="sx-auto-context">
+        <option value="off">Off</option>
+        <option value="file">Active file</option>
+        <option value="file+selection">Active file + selection</option>
+        <option value="workspace-tree">Workspace tree</option>
+      </select>
+      <label>Auto-context max chars</label><input id="sx-auto-context-max" type="number" min="1000" step="1000" placeholder="8000">
+      <label>Mux streams</label><input id="sx-concurrency" type="number" min="1" max="8" step="1" placeholder="1">
+      <label>Max output tokens</label><input id="sx-max-tokens" type="number" min="20" step="100" placeholder="1500">
       <label>Backing store</label><select id="sx-storage">
         <option value="auto">Auto — SQLite first, SQL Server fallback</option>
         <option value="sqlite">SQLite local store</option>
@@ -2546,7 +2728,7 @@ function setupGuiHtml(logoUri: string): string {
     var servers=[]; q('mcp-rows').querySelectorAll('.mcp-card').forEach(function(r){ servers.push({name:r.querySelector('.m-name').value.trim(),command:r.querySelector('.m-cmd').value.trim(),args:r.querySelector('.m-args').value.trim(),env:r.querySelector('.m-env').value.trim()}); });
     vscode.postMessage({type:'saveMcp',servers:servers});
   };
-  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value,storageBackend:q('sx-storage').value,sqliteStorePath:q('sx-sqlite-path').value.trim(),mssqlServer:q('sx-mssql-server').value.trim(),mssqlDatabase:q('sx-mssql-db').value.trim()}); };
+  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value,modelCatalogPath:q('sx-catalog-path').value.trim(),autoContext:q('sx-auto-context').value,autoContextMaxChars:q('sx-auto-context-max').value,concurrency:q('sx-concurrency').value,maxTokens:q('sx-max-tokens').value,storageBackend:q('sx-storage').value,sqliteStorePath:q('sx-sqlite-path').value.trim(),mssqlServer:q('sx-mssql-server').value.trim(),mssqlDatabase:q('sx-mssql-db').value.trim()}); };
   q('launch').onclick=function(){ vscode.postMessage({type:'launchCodex'}); };
   window.addEventListener('message',function(e){ var m=e.data;
     if(m.type==='data'){
@@ -2561,6 +2743,13 @@ function setupGuiHtml(logoUri: string): string {
       q('sx-base').value=m.scxcode.baseUrl; q('sx-key').value=m.scxcode.apiKeySet?('set · '+m.scxcode.keyCount+' key(s) in HKCU'):'NOT SET — set SCX_API_KEY';
       fillModelSelect(q('sx-model'),false);
       selectValid(q('sx-model'), m.scxcode.defaultModel, q('sx-model-note'), 'scx');
+      q('sx-catalog-path').value=m.scxcode.modelCatalogPath||'';
+      q('sx-catalog-path').placeholder=m.scxcode.modelCatalogResolvedPath||'C:\\\\KriticalSCX\\\\config\\\\models\\\\scx-model-catalog.json';
+      q('sx-catalog-note').innerHTML='Full catalog rows: <b>'+((m.modelCatalog&&m.modelCatalog.count)||0)+'</b>. Canonical: <code>'+((m.modelCatalog&&m.modelCatalog.path)||m.scxcode.modelCatalogResolvedPath||'')+'</code>.';
+      q('sx-auto-context').value=m.scxcode.autoContext||'file+selection';
+      q('sx-auto-context-max').value=m.scxcode.autoContextMaxChars||8000;
+      q('sx-concurrency').value=m.scxcode.concurrency||1;
+      q('sx-max-tokens').value=m.scxcode.maxTokens||1500;
       q('sx-storage').value=m.scxcode.storageBackend||'auto';
       q('sx-sqlite-path').value=m.scxcode.sqliteStorePath||'';
       q('sx-sqlite-path').placeholder=m.scxcode.sqliteResolvedPath||'~/.kritical-scx/scxcode-store.db';

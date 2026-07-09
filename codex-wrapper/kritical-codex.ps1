@@ -48,6 +48,8 @@ $shimScript  = Join-Path $PSScriptRoot 'scx-agentic-shim.mjs'
 $shimPort    = 4199
 $shimBase    = "http://127.0.0.1:$shimPort/v1"
 $scxDirect   = 'https://api.scx.ai/v1'
+$modelCatalogPath = if ($env:KRIT_SCX_MODEL_CATALOG_CACHE) { $env:KRIT_SCX_MODEL_CATALOG_CACHE } else { 'C:\KriticalSCX\config\models\scx-model-catalog.json' }
+$modelCatalogMirrorPath = Join-Path $env:USERPROFILE '.kritical-scx\models-catalog.full.json'
 
 # Models proven to drive agentic codex on SCX (emit tool calls AND accepted by codex through the shim).
 # NOTE: 'coder' emits function_calls fine on the raw API but codex rejects it with model_not_found
@@ -55,6 +57,25 @@ $scxDirect   = 'https://api.scx.ai/v1'
 # are chat-only (no tool calls). See spec §1f.
 $agenticModels = @('gpt-oss-120b','MiniMax-M2.7','gemma-4-31B-it','Meta-Llama-3.3-70B-Instruct','Llama-4-Maverick-17B-128E-Instruct')
 $defaultAgentic = 'MiniMax-M2.7'
+
+function Get-ScxCatalogModelIds {
+    $paths = @($modelCatalogPath, "$modelCatalogPath.bak", $modelCatalogMirrorPath, "$modelCatalogMirrorPath.bak") | Where-Object { $_ }
+    foreach ($p in $paths) {
+        try {
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            $parsed = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+            $rows = if ($parsed -is [array]) { @($parsed) } elseif ($parsed.models) { @($parsed.models) } else { @() }
+            $ids = @($rows | ForEach-Object {
+                if ($_ -is [string]) { $_ }
+                elseif ($_.id) { $_.id }
+                elseif ($_.model) { $_.model }
+                elseif ($_.name) { $_.name }
+            } | Where-Object { $_ })
+            if ($ids.Count) { return $ids }
+        } catch {}
+    }
+    return @()
+}
 
 # HR1/HR29: SCX key only. We never read/write OPENAI_* or ANTHROPIC_*.
 $scxKey = [Environment]::GetEnvironmentVariable('SCX_API_KEY','User'); if (-not $scxKey) { $scxKey = $env:SCX_API_KEY }
@@ -74,6 +95,11 @@ if (-not $Model) {
     if (Test-Path $sharedModel) { try { $Model = (Get-Content $sharedModel -Raw | ConvertFrom-Json).id; if ($Model) { $modelFromSharedFile = $true } } catch {} }
 }
 if ($Model) {
+    $catalogIds = Get-ScxCatalogModelIds
+    if ($catalogIds.Count) {
+        $catalogMatch = $catalogIds | Where-Object { $_ -ieq $Model } | Select-Object -First 1
+        if ($catalogMatch) { $Model = $catalogMatch }
+    }
     # accept case-insensitively; snap to the canonical agentic id
     $match = $agenticModels | Where-Object { $_ -ieq $Model } | Select-Object -First 1
     if ($match) { $Model = $match }

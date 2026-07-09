@@ -261,6 +261,12 @@
           "description": "Absolute path to the SCX Codex wrapper (kritical-codex.ps1). Leave blank to auto-discover in the workspace / extension. Used by the '✦ SCX Codex' button and the Open SCX Codex command.",
           "scope": "application"
         },
+        "kritical.scxcode.modelCatalogPath": {
+          "type": "string",
+          "default": "C:\\KriticalSCX\\config\\models\\scx-model-catalog.json",
+          "description": "Install-wide full model catalog JSON. Populated from SCX /v1/models, mirrored to ~/.kritical-scx/models-catalog.full.json, and used by the VS Code model picker plus SCX Codex wrapper.",
+          "scope": "application"
+        },
         "kritical.scxcode.defaultModel": {
           "type": "string",
           "default": "MiniMax-M2.7",
