@@ -1,0 +1,25 @@
+{
+  "restore_point_id": "2026-07-09-scxcodex-working",
+  "captured_at_local": "2026-07-09",
+  "runtime_path": "C:\\KriticalSCX\\dist\\Kritical.SCXCodex\\bin\\Kritical.SCXCodex.exe",
+  "backup_root": "C:\\KriticalSCX\\restore-points\\2026-07-09-scxcodex-working",
+  "running_process": {
+    "process_id": 8548,
+    "name": "Kritical.SCXCodex.exe",
+    "command_line": "\"C:\\KriticalSCX\\dist\\Kritical.SCXCodex\\bin\\Kritical.SCXCodex.exe\"",
+    "creation_date_local": "2026-07-09 10:28:13"
+  },
+  "exe": {
+    "length_bytes": 373131776,
+    "last_write_time_local": "2026-07-07 17:45:50",
+    "sha256": "C934C0E5E391EC348BC08E75039A3E3303D5605D46C7D51BDF83B88868CB4A1E"
+  },
+  "native_tool_boundary": {
+    "touches_native_claude": false,
+    "touches_native_claude_code": false,
+    "touches_native_chatgpt": false,
+    "touches_native_codex_auth": false,
+    "touches_openai_key": false,
+    "touches_anthropic_key": false
+  }
+}
