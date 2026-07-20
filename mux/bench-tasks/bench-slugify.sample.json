@@ -1,0 +1,59 @@
+{
+  "task": "Write a single JavaScript function `slugify(s)` that: lowercases the input, replaces every run of non-alphanumeric characters with a single hyphen, and trims leading/trailing hyphens. Return ONLY the function body in a code block, no prose.",
+  "maxTokens": 700,
+  "ranAt": "2026-07-06T05:00:39.235Z",
+  "results": [
+    {
+      "model": "MiniMax-M2.7",
+      "status": 200,
+      "ms": 1600,
+      "finish": "stop",
+      "promptTokens": 92,
+      "completionTokens": 510,
+      "reasoningTokens": 467,
+      "costUSD": 0.00169456,
+      "contentOnly": true,
+      "outputLen": 94,
+      "output": "```js\nreturn s\n  .toLowerCase()\n  .replace(/[^a-z0-9]+/g, '-')\n  .replace(/^-+|-+$/g, '');\n```"
+    },
+    {
+      "model": "gpt-oss-120b",
+      "status": 200,
+      "ms": 1155,
+      "finish": "length",
+      "promptTokens": 135,
+      "completionTokens": 700,
+      "reasoningTokens": 698,
+      "costUSD": 0.0007264999999999999,
+      "contentOnly": false,
+      "outputLen": 417,
+      "output": "[reasoning-only] es the signature. The phrase \"function body\" is ambiguous. Many similar prompts ask to output the function definition. I'd output the full function definition, as it's more useful. But they explicitly say \"Return ONLY the function body in a code block\". So I think they want just the code inside the braces. Let's do that.\n\nThus output:\n\n```js\nreturn String(s)\n  .toLowerCase()\n  .replace(/[^a-z0-9]+"
+    },
+    {
+      "model": "DeepSeek-V3.1",
+      "status": 200,
+      "ms": 984,
+      "finish": "stop",
+      "promptTokens": 58,
+      "completionTokens": 46,
+      "reasoningTokens": 0,
+      "costUSD": 0.0005945,
+      "contentOnly": true,
+      "outputLen": 147,
+      "output": "```javascript\nfunction slugify(s) {\n    return s.toLowerCase()\n            .replace(/[^a-z0-9]+/g, '-')\n            .replace(/^-+|-+$/g, '');\n}\n```"
+    },
+    {
+      "model": "gemma-4-31B-it",
+      "status": 200,
+      "ms": 1103,
+      "finish": "stop",
+      "promptTokens": 67,
+      "completionTokens": 52,
+      "reasoningTokens": 0,
+      "costUSD": 0.00012094000000000002,
+      "contentOnly": true,
+      "outputLen": 134,
+      "output": "```javascript\nfunction slugify(s) {\n  return s\n    .toLowerCase()\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '');\n}\n```"
+    }
+  ]
+}

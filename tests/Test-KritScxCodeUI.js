@@ -16,7 +16,7 @@ let pass = 0, fail = 0;
 function ok(n, c) { if (c) { pass++; } else { fail++; console.log('  FAIL ' + n); } }
 
 // ---- 1. every element declared in HTML ----
-const ELEMENTS = ['model','len','streams','ctx','temp','tempVal','tempSrc','provider','advBtn','adv','ctxChip','tbUpload','tbRepo','tbMcp','tbCodex','in','send','clear','chat'];
+const ELEMENTS = ['model','len','streams','ctx','temp','tempVal','tempSrc','provider','advBtn','adv','ctxChip','tbFiles','tbFolder','tbRepo','tbMcp','tbCodex','in','send','clear','chat'];
 console.log('--- 1. all interactive elements present in HTML ---');
 ELEMENTS.forEach(id => ok('#' + id + ' present', html.includes('id="' + id + '"')));
 ok('sales tagline present', html.includes('IT &amp; IT Security Experts'));
@@ -75,7 +75,8 @@ ok('streams change -> setConfig concurrency', firePost(els.streams, els.streams.
 ok('context change -> setConfig autoContext', firePost(els.ctx, els.ctx.onchange_, 'off', 'setConfig', 'autoContext'));
 ok('provider change -> setConfig provider', firePost(els.provider, els.provider.onchange_, 'auto', 'setConfig', 'provider'));
 ok('temp change -> setConfig temperature', firePost(els.temp, els.temp.onchange_, '0.7', 'setConfig', 'temperature'));
-ok('File button -> uploadFile', firePost(els.tbUpload, els.tbUpload.onclick_, undefined, 'uploadFile'));
+ok('Files button -> uploadFile', firePost(els.tbFiles, els.tbFiles.onclick_, undefined, 'uploadFile'));
+ok('Folder button -> uploadFolder', firePost(els.tbFolder, els.tbFolder.onclick_, undefined, 'uploadFolder'));
 ok('Repo button -> attachRepo', firePost(els.tbRepo, els.tbRepo.onclick_, undefined, 'attachRepo'));
 ok('MCP button -> listMcp', firePost(els.tbMcp, els.tbMcp.onclick_, undefined, 'listMcp'));
 ok('SCX Codex button -> openCodex', firePost(els.tbCodex, els.tbCodex.onclick_, undefined, 'scxCodex'));

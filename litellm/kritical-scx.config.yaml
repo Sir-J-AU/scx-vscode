@@ -108,6 +108,24 @@ model_list:
       api_key: os.environ/SCX_API_KEY
       mock_response: false
 
+  # -------- thegrid.ai spot-market Anthropic upstream -------
+  # thegrid presents the native Anthropic Messages wire shape (x-api-key +
+  # anthropic-version header, POST /v1/messages) — the SAME protocol Claude
+  # Code speaks — so tool_use / tool_result blocks pass through untranslated.
+  # 'code-standard' is an INSTRUMENT SLA string (quality>=28, latency<=3s,
+  # ~$0.031/1M), NOT a model name; thegrid routes it to whichever underlying
+  # model wins the spot auction. LiteLLM's anthropic provider appends
+  # /v1/messages to api_base and authenticates via x-api-key — an exact fit.
+  # This is NOT an Anthropic/OpenAI vendor key (HR1) — it is thegrid's own
+  # sovereign spot-gateway token, the enabler for bulk work off Claude tokens.
+  # Additive (HR29): absent THEGRID_API_KEY this row is simply unroutable and
+  # every SCX entry + direct-API fallback keeps working unchanged.
+  - model_name: thegrid-code-standard
+    litellm_params:
+      model: anthropic/code-standard
+      api_base: https://messages-beta.api.thegrid.ai
+      api_key: os.environ/THEGRID_API_KEY
+
   # ==========================================================
   # TRADITIONAL PROVIDER PASSTHROUGH — REMOVED from the SCX-only default (HR1).
   # ----------------------------------------------------------

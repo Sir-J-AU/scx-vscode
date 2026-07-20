@@ -20,6 +20,21 @@ $packageDir = $manifestData.compiled_package_dir
 $entrypoint = $manifestData.compiled_entrypoint
 $receipt = Join-Path $packageDir '.kritical-scxcodex-build.receipt.json'
 
+function Remove-LegacyShimFiles {
+  $legacyPaths = @(
+    'C:\KriticalSCX\bin\scxcodex.cmd',
+    'C:\KriticalSCX\bin\kcodex.cmd',
+    (Join-Path $env:LOCALAPPDATA 'Kritical\bin\scxcodex.cmd'),
+    (Join-Path $env:LOCALAPPDATA 'Kritical\bin\kcodex.cmd')
+  )
+  foreach ($path in $legacyPaths) {
+    if ($path -and (Test-Path -LiteralPath $path)) {
+      Remove-Item -LiteralPath $path -Force
+      Write-Host "removed legacy shim $path" -ForegroundColor Yellow
+    }
+  }
+}
+
 function Assert-UnderKriticalRoot([string]$Path) {
   $resolved = [System.IO.Path]::GetFullPath($Path)
   $root = [System.IO.Path]::GetFullPath('C:\KriticalSCX')
@@ -45,9 +60,11 @@ function Show-Status {
 
 switch ($Mode) {
   'Install' {
+    Remove-LegacyShimFiles
     & $buildScript -Mode Build -Manifest $Manifest
   }
   'Heal' {
+    Remove-LegacyShimFiles
     if (Test-Path -LiteralPath $entrypoint) {
       & $buildScript -Mode Verify -Manifest $Manifest
     } else {
@@ -55,6 +72,7 @@ switch ($Mode) {
     }
   }
   'Remove' {
+    Remove-LegacyShimFiles
     $safePackageDir = Assert-UnderKriticalRoot $packageDir
     $safeBuildRoot = Assert-UnderKriticalRoot $manifestData.build_root
     if (Test-Path -LiteralPath $safePackageDir) {

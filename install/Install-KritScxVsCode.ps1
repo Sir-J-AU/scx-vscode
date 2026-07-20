@@ -80,7 +80,21 @@ function Test-CodeExtension([string]$id, [string]$CodeExe = 'code') {
     } catch { return $false }
 }
 
-function Invoke-InstallContinue {
+# .5231 (bughunt) — is the dropped Continue config already present AND a valid Kritical config?
+# Used by Heal so a healthy config is never clobbered (which would wipe operator edits to it).
+function Test-KritContinueConfigValid {
+    if (-not (Test-Path $script:ContinueCfg)) { return $false }
+    try {
+        $body = Get-Content -LiteralPath $script:ContinueCfg -Raw
+        if ($body -notmatch 'Kritical SCX config for Continue.dev') { return $false }  # operator-authored — not ours to judge
+        $null = $body | ConvertFrom-Json -ErrorAction Stop                              # must be valid JSON
+        return $true
+    } catch { return $false }
+}
+
+# .5231 (bughunt) — when $Heal is set, only re-install parts that are actually missing/broken.
+# A valid, Kritical-authored Continue config is left untouched (Heal must not overwrite operator edits).
+function Invoke-InstallContinue([switch]$Heal) {
     $results = [ordered]@{}
 
     # 1. Read SCX key from Kritical secrets dir
@@ -141,6 +155,10 @@ function Invoke-InstallContinue {
     $tpl = Join-Path $script:RepoRoot 'config-templates\continue-config.json'
     if (-not (Test-Path $tpl)) {
         $results['ConfigDrop'] = "FAIL: template not found at $tpl"
+    } elseif ($Heal -and (Test-KritContinueConfigValid)) {
+        # .5231 (bughunt) — Heal must be idempotent: a valid Kritical config already exists, so leave
+        # it (and any operator edits to it) untouched instead of re-dropping the template over the top.
+        $results['ConfigDrop'] = 'ALREADY-VALID: Kritical config present — left untouched (Heal)'
     } else {
         if (Test-Path $script:ContinueCfg) {
             $bak = "$script:ContinueCfg.bak.krit-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
@@ -199,7 +217,15 @@ Write-Host ""
 $results = switch ($Mode) {
     'Install' { if ($Path -in 'Continue','All') { Invoke-InstallContinue } else { [ordered]@{ 'Path' = "TODO: $Path installer pending — see docs/ARCHITECTURE.md" } } }
     'Remove'  { Invoke-RemoveContinue }
-    'Heal'    { $s = Invoke-Status; $missing = $s.GetEnumerator() | Where-Object { $_.Value -match 'ABSENT|NOT-INSTALLED' } ; if (-not $missing) { [ordered]@{ 'Heal' = 'ALL HEALTHY — no action' } } else { Write-Host "  detected $($missing.Count) missing/broken part(s) — running Install"; Invoke-InstallContinue } }
+    'Heal'    {
+        # .5231 (bughunt) — Heal is now idempotent: it still re-runs the installer for missing/broken
+        # parts (env vars + extension are individually idempotent), but passes -Heal so a VALID
+        # Kritical Continue config is preserved rather than clobbered (which wiped operator edits).
+        $s = Invoke-Status
+        $missing = $s.GetEnumerator() | Where-Object { $_.Value -match 'ABSENT|NOT-INSTALLED' }
+        if (-not $missing) { [ordered]@{ 'Heal' = 'ALL HEALTHY — no action' } }
+        else { Write-Host "  detected $($missing.Count) missing/broken part(s) — healing (config preserved if valid)"; Invoke-InstallContinue -Heal }
+    }
     'Status'  { Invoke-Status }
 }
 

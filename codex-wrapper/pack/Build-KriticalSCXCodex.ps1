@@ -150,10 +150,10 @@ function Ensure-RustToolchain {
     $rustup = Resolve-CommandPath 'rustup' @("$env:USERPROFILE\.cargo\bin\rustup.exe")
     if ($rustup -and $script:BuildTarget) {
       if ($script:BuildTarget -eq 'x86_64-pc-windows-msvc') {
-        Invoke-Logged $rustup @('toolchain', 'install', 'stable-x86_64-pc-windows-msvc', '--force-non-host') (Get-Location).Path
-        Invoke-Logged $rustup @('+stable-x86_64-pc-windows-msvc', 'target', 'add', $script:BuildTarget) (Get-Location).Path
+        $null = Invoke-Logged $rustup @('toolchain', 'install', 'stable-x86_64-pc-windows-msvc', '--force-non-host') (Get-Location).Path
+        $null = Invoke-Logged $rustup @('+stable-x86_64-pc-windows-msvc', 'target', 'add', $script:BuildTarget) (Get-Location).Path
       } else {
-        Invoke-Logged $rustup @('target', 'add', $script:BuildTarget) (Get-Location).Path
+        $null = Invoke-Logged $rustup @('target', 'add', $script:BuildTarget) (Get-Location).Path
       }
     }
     return $cargo
@@ -166,7 +166,7 @@ function Ensure-RustToolchain {
   }
 
   Write-Host 'cargo not found; installing Rustup with winget ...' -ForegroundColor Yellow
-  Invoke-Logged $winget @(
+  $null = Invoke-Logged $winget @(
     'install',
     '--id', 'Rustlang.Rustup',
     '-e',
@@ -178,14 +178,14 @@ function Ensure-RustToolchain {
   Update-ProcessPathForBuildTools
   $rustup = Resolve-CommandPath 'rustup' @("$env:USERPROFILE\.cargo\bin\rustup.exe")
   if ($rustup) {
-    Invoke-Logged $rustup @('toolchain', 'install', 'stable') (Get-Location).Path
-    Invoke-Logged $rustup @('default', 'stable') (Get-Location).Path
+    $null = Invoke-Logged $rustup @('toolchain', 'install', 'stable') (Get-Location).Path
+    $null = Invoke-Logged $rustup @('default', 'stable') (Get-Location).Path
     if ($script:BuildTarget) {
       if ($script:BuildTarget -eq 'x86_64-pc-windows-msvc') {
-        Invoke-Logged $rustup @('toolchain', 'install', 'stable-x86_64-pc-windows-msvc', '--force-non-host') (Get-Location).Path
-        Invoke-Logged $rustup @('+stable-x86_64-pc-windows-msvc', 'target', 'add', $script:BuildTarget) (Get-Location).Path
+        $null = Invoke-Logged $rustup @('toolchain', 'install', 'stable-x86_64-pc-windows-msvc', '--force-non-host') (Get-Location).Path
+        $null = Invoke-Logged $rustup @('+stable-x86_64-pc-windows-msvc', 'target', 'add', $script:BuildTarget) (Get-Location).Path
       } else {
-        Invoke-Logged $rustup @('target', 'add', $script:BuildTarget) (Get-Location).Path
+        $null = Invoke-Logged $rustup @('target', 'add', $script:BuildTarget) (Get-Location).Path
       }
     }
   }
@@ -199,16 +199,9 @@ function Get-DefaultWindowsRustTarget {
 }
 
 function Test-BinaryContainsUtf8([string]$Path, [string]$Needle) {
-  $needleBytes = [System.Text.Encoding]::UTF8.GetBytes($Needle)
   $bytes = [System.IO.File]::ReadAllBytes($Path)
-  for ($i = 0; $i -le $bytes.Length - $needleBytes.Length; $i++) {
-    $matched = $true
-    for ($j = 0; $j -lt $needleBytes.Length; $j++) {
-      if ($bytes[$i + $j] -ne $needleBytes[$j]) { $matched = $false; break }
-    }
-    if ($matched) { return $true }
-  }
-  return $false
+  $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+  return $text.Contains($Needle)
 }
 
 function Set-ScxBrandingOverlay([string]$Worktree) {
@@ -318,7 +311,14 @@ switch ($Mode) {
     Set-ScxBrandingOverlay $worktree
 
     $cargoEnv = @{ CARGO_TARGET_DIR = $targetDir }
-    Invoke-Logged $cargo @('build', '--target', $script:BuildTarget, '--profile', $CargoProfile, '--bin', 'codex') (Join-Path $worktree 'codex-rs') $cargoEnv
+    if ($script:BuildTarget -eq 'x86_64-pc-windows-msvc') {
+      $cargoEnv.RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-msvc'
+    }
+    $cargoArgs = @('build', '--target', $script:BuildTarget, '--profile', $CargoProfile, '--bin', 'codex')
+    if ($script:BuildTarget -eq 'x86_64-pc-windows-msvc') {
+      $cargoArgs = @('+stable-x86_64-pc-windows-msvc') + $cargoArgs
+    }
+    Invoke-Logged $cargo $cargoArgs (Join-Path $worktree 'codex-rs') $cargoEnv
     $builtCodex = Join-Path $targetDir "$script:BuildTarget\$CargoProfile\codex.exe"
     if (-not (Test-Path -LiteralPath $builtCodex)) { throw "Cargo did not produce $builtCodex" }
     Copy-Item -LiteralPath $builtCodex -Destination $prebuiltExe -Force

@@ -14,7 +14,8 @@ import * as vscode from 'vscode';
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
+import * as os from 'os';
+import { spawn, execFileSync } from 'child_process';
 import * as tomlLib from '@iarna/toml';
 
 interface ScxMessage { role: 'user' | 'assistant' | 'system'; content: string; }
@@ -41,7 +42,29 @@ function getOutputChannel(): vscode.OutputChannel {
   return _outputChannel;
 }
 // .5211 — real rotating key pointer (was hardcoded to apiKeys[1]/index 2, so 3+ keys never rotated).
-let _keyRotation = 0;
+// .5231b (re-hunt) — persist the pointer across VS Code restarts. It was module-scoped only, so a
+// crash / update / window reload reset it to 0, silently reverting the operator's manual "Switch SCX
+// key" selection (e.g. back onto an exhausted key1) with no indication. Mirror it to a tiny file in
+// ~/.kritical-scx so the last-selected key survives a restart. Best-effort: any I/O error is ignored
+// and the in-memory pointer still works.
+const _keyRotationStatePath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'key-rotation.json');
+function loadKeyRotation(): number {
+  try {
+    const raw = JSON.parse(fs.readFileSync(_keyRotationStatePath, 'utf8'));
+    const n = Number(raw && raw.rotation);
+    if (Number.isInteger(n) && n >= 0) { return n; }
+  } catch { /* no state yet / unreadable — start at 0 */ }
+  return 0;
+}
+function saveKeyRotation(rotation: number): void {
+  try {
+    fs.mkdirSync(path.dirname(_keyRotationStatePath), { recursive: true });
+    const tmp = `${_keyRotationStatePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ rotation, ts: new Date().toISOString() }));
+    fs.renameSync(tmp, _keyRotationStatePath);   // atomic — never leave a truncated state file
+  } catch { /* best effort — never break a key switch */ }
+}
+let _keyRotation = loadKeyRotation();
 
 function getConfig() {
   const c = vscode.workspace.getConfiguration('kritical.scxcode');
@@ -68,6 +91,11 @@ function getConfig() {
     autocompact: c.get<'off' | 'auto' | 'aggressive'>('autocompact', 'auto'),
     systemPrompt: c.get<string>('systemPrompt', ''),
     telemetry: c.get<'off' | 'local-only' | 'kritical-endpoint'>('telemetry', 'off'),
+    storageBackend: c.get<'auto' | 'sqlite' | 'mssql'>('storageBackend', 'auto'),
+    sqliteStorePath: c.get<string>('sqliteStorePath', ''),
+    mssqlServer: c.get<string>('mssqlServer', '.\\SQLEXPRESS'),
+    mssqlDatabase: c.get<string>('mssqlDatabase', 'KriticalSCXCodeStore'),
+    modelCatalogPath: c.get<string>('modelCatalogPath', 'C:\\KriticalSCX\\config\\models\\scx-model-catalog.json'),
     // .5165e — auto-context wiring
     autoContext: c.get<'off' | 'file' | 'file+selection' | 'workspace-tree'>('autoContext', 'file+selection'),
     autoContextMaxChars: c.get<number>('autoContextMaxChars', 8000),
@@ -117,10 +145,29 @@ function modelTempSrc(id: string): string {
 // If the fetch fails we use the cache; if no cache, the hardcoded SCX_MODEL_CATALOG (preseed).
 let _liveModels: ScxModel[] | null = null;
 const _modelsCachePath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'models-cache.json');
+const _modelsFullCatalogPath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'models-catalog.full.json');
+const _installModelCatalogPath = 'C:\\KriticalSCX\\config\\models\\scx-model-catalog.json';
+const _installModelCatalogHistoryDir = 'C:\\KriticalSCX\\config\\models\\history';
 const _modelsCacheBak = _modelsCachePath + '.bak';
+function safeSlug(value: string): string {
+  return String(value || 'unknown').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'unknown';
+}
+function configuredModelCatalogPath(): string {
+  const raw = vscode.workspace.getConfiguration('kritical.scxcode').get<string>('modelCatalogPath', _installModelCatalogPath);
+  return raw && raw.trim() ? raw.trim() : _installModelCatalogPath;
+}
+function modelCatalogCandidates(): string[] {
+  const configured = configuredModelCatalogPath();
+  return Array.from(new Set([
+    configured,
+    configured + '.bak',
+    _modelsFullCatalogPath,
+    _modelsFullCatalogPath + '.bak',
+  ].filter(Boolean)));
+}
 // .5228 — atomic + idempotent + backup write for ANY API-derived cache (never leave a half-written or
 // empty cache that could blank the dropdown). Write temp file -> validate -> rotate current to .bak -> rename.
-function writeCacheAtomic(pathTarget: string, data: any): void {
+function writeCacheAtomic(pathTarget: string, data: any, historyDetail?: string): void {
   try {
     const json = JSON.stringify(data);
     if (!json || json === '[]' || json === 'null') { return; }        // never persist an empty/blank cache
@@ -128,9 +175,38 @@ function writeCacheAtomic(pathTarget: string, data: any): void {
     fs.mkdirSync(path.dirname(pathTarget), { recursive: true });
     fs.writeFileSync(tmp, json);
     JSON.parse(fs.readFileSync(tmp, 'utf8'));                          // validate round-trip before committing
-    if (fs.existsSync(pathTarget)) { try { fs.copyFileSync(pathTarget, pathTarget + '.bak'); } catch { /* best effort */ } }
+    if (fs.existsSync(pathTarget)) {
+      try { fs.copyFileSync(pathTarget, pathTarget + '.bak'); } catch { /* best effort */ }
+      if (historyDetail) {
+        try {
+          fs.mkdirSync(_installModelCatalogHistoryDir, { recursive: true });
+          const stamp = new Date().toISOString().replace(/[:.]/g, '').replace('T', 'T').replace('Z', 'Z');
+          const hist = path.join(_installModelCatalogHistoryDir, `${safeSlug('scx')}-${safeSlug(historyDetail)}-${stamp}.previous.json`);
+          fs.copyFileSync(pathTarget, hist);
+        } catch { /* best effort */ }
+      }
+    }
     fs.renameSync(tmp, pathTarget);
   } catch { /* keep prior cache */ }
+}
+function writeModelCatalogCache(rows: any[], source: string, statusCode?: number): void {
+  if (!Array.isArray(rows) || !rows.length) { return; }
+  const chatRows = rows.filter((r: any) => !NON_CHAT_MODEL.test(String((typeof r === 'string') ? r : (r?.id || r?.model || r?.name || ''))));
+  const payload = {
+    captured_utc: new Date().toISOString(),
+    provider: 'scx',
+    server: 'scx',
+    source,
+    status: statusCode || null,
+    count: rows.length,
+    chat_count: chatRows.length,
+    canonical_path: configuredModelCatalogPath(),
+    mirror_path: _modelsFullCatalogPath,
+    backup_history_dir: _installModelCatalogHistoryDir,
+    models: rows,
+  };
+  writeCacheAtomic(configuredModelCatalogPath(), payload, 'models-catalog');
+  writeCacheAtomic(_modelsFullCatalogPath, payload, 'models-catalog-user-mirror');
 }
 // read a cache with fallback to its .bak, then to null (caller falls back to preseed) — never throws.
 function readCacheOrBak(pathTarget: string): ScxModel[] | null {
@@ -161,10 +237,26 @@ function healTemps(list: ScxModel[]): ScxModel[] {
 // appear in the chat picker — selecting one was the root cause of the "Unsupported model" error.
 const NON_CHAT_MODEL = /(embed|e5-mistral|whisper|opir|moderation|rerank|guard)/i;
 function isChatModel(m: ScxModel): boolean { return !NON_CHAT_MODEL.test(m.id); }
+function rowsToScxModels(rows: any[]): ScxModel[] {
+  const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
+  return rows.map((r: any) => {
+    const id = typeof r === 'string' ? r : (r?.id || r?.model || r?.name);
+    if (!id) { return null; }
+    const k = known.get(String(id).toLowerCase());
+    const apiTemp = (typeof r === 'object') ? (r.default_temperature ?? r.temperature ?? (r.params && r.params.temperature)) : undefined;
+    if (typeof apiTemp === 'number') { return { id: String(id), detail: k ? k.detail : 'live', temp: apiTemp, tempSrc: 'api' }; }
+    return { id: String(id), detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK, tempSrc: k ? (k.tempSrc || 'def') : 'def' };
+  }).filter(Boolean) as ScxModel[];
+}
 function getModelCatalog(): ScxModel[] {
   let list: ScxModel[];
   if (_liveModels && _liveModels.length) { list = healTemps(_liveModels); }
-  else { const cached = readCacheOrBak(_modelsCachePath); list = cached ? healTemps(cached) : SCX_MODEL_CATALOG; }
+  else {
+    const fullRows = readFullModelRows();
+    const fullModels = fullRows.length ? rowsToScxModels(fullRows) : [];
+    const cached = fullModels.length ? fullModels : readCacheOrBak(_modelsCachePath);
+    list = cached ? healTemps(cached) : SCX_MODEL_CATALOG;
+  }
   const chat = list.filter(isChatModel);
   return chat.length ? chat : SCX_MODEL_CATALOG.filter(isChatModel); // never blank the dropdown
 }
@@ -181,6 +273,89 @@ function normalizeModelId(id: string): string {
   return cat.length ? cat[0].id : id; // last resort — a known-good chat model
 }
 
+function readFullModelRows(): any[] {
+  for (const p of modelCatalogCandidates()) {
+    try {
+      if (!fs.existsSync(p)) { continue; }
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const rows = Array.isArray(parsed) ? parsed : parsed.models;
+      if (Array.isArray(rows) && rows.length) { return rows; }
+    } catch { /* try next */ }
+  }
+  return [];
+}
+
+function modelContextTokens(id: string): number {
+  const rows = readFullModelRows();
+  const row = rows.find((m: any) => String(m?.id || m?.model || m?.name || '').toLowerCase() === String(id || '').toLowerCase());
+  const candidates = row ? [
+    row.context_length, row.context_window, row.context, row.max_context_length,
+    row.max_input_tokens, row.input_token_limit, row.input_tokens,
+  ] : [];
+  const live = candidates.map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0);
+  if (live) { return live; }
+  const known: Record<string, number> = {
+    'minimax-m2.7': 192000,
+    'coder': 196000,
+    'gpt-oss-120b': 131000,
+    'deepseek-v3.1': 131000,
+    'magpie': 131000,
+    'gemma-4-31b-it': 131000,
+    'meta-llama-3.3-70b-instruct': 131000,
+    'llama-4-maverick-17b-128e-instruct': 131000,
+    'qwen3-32b': 32000,
+  };
+  return known[String(id || '').toLowerCase()] || 108000;
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(String(text || '').length / 4);
+}
+
+function summarizeForCompaction(messages: ScxMessage[]): string {
+  return messages.map((m, i) => {
+    const compact = m.content.replace(/\s+/g, ' ').trim().slice(0, 700);
+    return `${i + 1}. ${m.role}: ${compact}${m.content.length > 700 ? ' ...' : ''}`;
+  }).join('\n');
+}
+
+function compactMessagesForSend(history: ScxMessage[], model: string, extraChars = 0):
+    { messages: ScxMessage[]; compactedTurns: number } {
+  const cfg = getConfig();
+  if (cfg.autocompact === 'off' || history.length < 9) {
+    return { messages: [...history], compactedTurns: 0 };
+  }
+  const contextTokens = modelContextTokens(model);
+  const threshold = cfg.autocompact === 'aggressive' ? 0.50 : 0.72;
+  const reserve = Math.max(cfg.maxTokens + 1500, 3500);
+  const budget = Math.max(4000, Math.floor(contextTokens * threshold) - reserve);
+  const estimated = history.reduce((sum, m) => sum + estimateTokens(m.content), 0) + estimateTokens('x'.repeat(extraChars));
+  if (estimated <= budget) {
+    return { messages: [...history], compactedTurns: 0 };
+  }
+
+  const keep = cfg.autocompact === 'aggressive' ? 5 : 7; // odd count keeps user/assistant alternation after summary pair
+  const recent = history.slice(-keep);
+  const old = history.slice(0, Math.max(0, history.length - keep));
+  if (!old.length) {
+    return { messages: [...history], compactedTurns: 0 };
+  }
+  const summary = [
+    '## Kritical SCXCode Auto-Context Flush',
+    `Compacted ${old.length} earlier turns locally before sending to avoid resending stale full history.`,
+    'Preserve decisions, constraints, file names, commands, errors, and current objective from this summary:',
+    summarizeForCompaction(old),
+  ].join('\n');
+  return {
+    messages: [
+      { role: 'user', content: summary },
+      { role: 'assistant', content: 'Acknowledged. I will treat the compacted prior-context summary as the earlier conversation state.' },
+      ...recent,
+    ],
+    compactedTurns: old.length,
+  };
+}
+
 // .5231 — publish the currently-selected model to a shared file the codex wrapper reads, so
 // "SCX Codex" launches on the SAME model the chat panel is using (operator .5231 request).
 const _currentModelPath = path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'current-model.json');
@@ -190,7 +365,14 @@ function publishCurrentModel(id: string): void {
   _lastPublishedModel = id;
   try {
     fs.mkdirSync(path.dirname(_currentModelPath), { recursive: true });
-    fs.writeFileSync(_currentModelPath, JSON.stringify({ id, ts: new Date().toISOString() }));
+    // .5231b (re-hunt) — write atomically: a plain writeFileSync that's interrupted (disk full, crash,
+    // permission flip mid-write) leaves current-model.json truncated ("{" only), which the codex wrapper
+    // then fails to JSON.parse and silently falls back to the default model instead of the operator's
+    // selection. Write to a temp sibling then rename (atomic on the same volume) so a reader only ever
+    // sees a complete file or the previous complete file — never a half-written one.
+    const tmp = `${_currentModelPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ id, ts: new Date().toISOString() }));
+    fs.renameSync(tmp, _currentModelPath);
   } catch { /* best effort — never break a chat send */ }
 }
 
@@ -220,18 +402,14 @@ function fetchLiveModels(): void {
         try {
           const j = JSON.parse(buf);
           const rows: any[] = Array.isArray(j.data) ? j.data : (Array.isArray(j.models) ? j.models : []);
-          const known = new Map(SCX_MODEL_CATALOG.map((m) => [m.id.toLowerCase(), m]));
-          const next: ScxModel[] = rows.map((r: any) => {
-            const id = typeof r === 'string' ? r : (r.id || r.model || r.name);
-            if (!id) { return null; }
-            const k = known.get(String(id).toLowerCase());
-            // .5228 — honour a temperature the API itself advertises (default_temperature / temperature /
-            // params.temperature) — that is authoritative over our hardcoded guess.
-            const apiTemp = (typeof r === 'object') ? (r.default_temperature ?? r.temperature ?? (r.params && r.params.temperature)) : undefined;
-            if (typeof apiTemp === 'number') { return { id, detail: k ? k.detail : 'live', temp: apiTemp, tempSrc: 'api' }; }
-            return { id, detail: k ? k.detail : 'live', temp: k ? k.temp : SCX_TEMP_FALLBACK, tempSrc: k ? (k.tempSrc || 'def') : 'def' };
-          }).filter(Boolean) as ScxModel[];
-          if (next.length) { _liveModels = next; writeCacheAtomic(_modelsCachePath, next); }  // only replace on a non-empty fetch
+          // .5228 — honour a temperature the API itself advertises (default_temperature / temperature /
+          // params.temperature) — that is authoritative over our hardcoded guess.
+          const next: ScxModel[] = rowsToScxModels(rows);
+          if (next.length) {
+            _liveModels = next;
+            writeCacheAtomic(_modelsCachePath, next); // reduced picker cache
+            writeModelCatalogCache(rows, `vscode-extension:${url.href}`, res.statusCode); // full-fidelity API metadata
+          }  // only replace on a non-empty fetch
         } catch { /* keep cache/preseed — dropdown never blanks */ }
       });
     });
@@ -420,9 +598,9 @@ async function scxPost(model: string, messages: ScxMessage[], maxTokens = 800, k
   if (!useKey) throw new Error('SCX_API_KEY not set. Configure kritical.scxcode.apiKey or set HKCU env SCX_API_KEY.');
   model = normalizeModelId(model);       // .5231 — match the endpoint's exact id (direct vs proxy casing)
   publishCurrentModel(model);            // .5231 — share the live model with the codex wrapper
-  // .5231 (bughunt-confirmed) — clamp to SCX's proven [0,2] ceiling so an out-of-range config/slider
-  // value can't produce a hard 400 from the endpoint.
-  const temp = Math.max(0, Math.min(2, Number.isFinite(temperature) ? temperature : 0.2));
+  // .5231 (bughunt-confirmed) — clamp to SCX's OpenAI-compatible safe [0,1] range so an
+  // out-of-range config/slider value can't produce a hard 400 from the endpoint.
+  const temp = Math.max(0, Math.min(1, Number.isFinite(temperature) ? temperature : 0.2));
   const body: ScxCompletionRequest = { model, messages, max_tokens: maxTokens, temperature: temp };
   if (systemPrompt) body.system = systemPrompt;
 
@@ -633,17 +811,11 @@ async function cmdTestConnection() {
 
 async function cmdPickModel() {
   const cfg = getConfig();
-  const catalog: Array<{ label: string; description: string; detail: string }> = [
-    { label: 'MiniMax-M2.7', description: '192K ctx · default agentic', detail: '230B sparse MoE (10B active) — AUD $0.68 in / $3.20 out per 1M' },
-    { label: 'MAGPiE',        description: '131K ctx · near o4-mini reasoning', detail: '117B MoE from scx.ai — AUD $0.75 in / $1.75 out per 1M' },
-    { label: 'gpt-oss-120b',  description: '131K ctx · cheapest reasoner',      detail: '117B open-weight MoE — AUD $0.30 in / $0.98 out per 1M' },
-    { label: 'DeepSeek-V3.1', description: '131K ctx · reserve for hard problems', detail: '671B MoE (37B active) — AUD $4.50 in / $7.25 out per 1M' },
-    { label: 'coder',          description: '196K ctx · algorithms + debugging', detail: 'SCX coder — AUD $0.85 in / $3.75 out per 1M' },
-    { label: 'gemma-4-31B-it', description: '131K ctx · multimodal + thinking',  detail: 'Google Gemma 4 31B — AUD $0.54 in / $1.63 out per 1M' },
-    { label: 'Llama-4-Maverick-17B-128E-Instruct', description: '131K ctx · multimodal', detail: 'Llama 4 Maverick 400B MoE — AUD $0.95 in / $2.90 out per 1M' },
-    { label: 'Meta-Llama-3.3-70B-Instruct', description: '131K ctx · dense',      detail: '70B → 405B-class perf — AUD $0.95 in / $1.95 out per 1M' },
-    { label: 'Qwen3-32B',     description: '32K ctx · 119 languages',            detail: 'Qwen3 32B dense — AUD $0.65 in / $1.55 out per 1M' },
-  ];
+  const catalog: Array<{ label: string; description: string; detail: string }> = getModelCatalog().map((m) => ({
+    label: m.id,
+    description: `${modelContextTokens(m.id).toLocaleString()} ctx · ${m.detail || 'live catalog'}`,
+    detail: `temperature ${m.temp} (${m.tempSrc || 'def'}) · source ${configuredModelCatalogPath()}`,
+  }));
   const picked = await vscode.window.showQuickPick(catalog, {
     title: 'Kritical SCXCode — pick default model',
     placeHolder: `Current: ${cfg.defaultModel}. Pick to change kritical.scxcode.defaultModel.`,
@@ -767,15 +939,20 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       try {
         const cfg = getConfig();
         const ctxPrefix = buildAutoContext() + attached;
-        const messagesForApi: ScxMessage[] = [...history];
+        const compacted = compactMessagesForSend(history, cfg.defaultModel, ctxPrefix.length);
+        const messagesForApi: ScxMessage[] = [...compacted.messages];
         if (ctxPrefix && messagesForApi.length > 0) {
           messagesForApi[messagesForApi.length - 1] = { role: 'user', content: ctxPrefix + msg.text };
         }
         attached = '';
         const { res, modelUsed, keyIndex, shards } = await scxMux(messagesForApi, cfg.concurrency, cfg.maxTokens);
         const replyText = res.content.map((c) => c.text).join('');
+        if (compacted.compactedTurns > 0) {
+          history.length = 0;
+          history.push(...compacted.messages);
+        }
         history.push({ role: 'assistant', content: replyText });
-        panel.webview.postMessage({ type: 'reply', text: replyText, model: modelUsed, keyIndex, shards, tokensIn: res.usage.input_tokens, tokensOut: res.usage.output_tokens, autoContextChars: ctxPrefix.length });
+        panel.webview.postMessage({ type: 'reply', text: replyText, model: modelUsed, keyIndex, shards, tokensIn: res.usage.input_tokens, tokensOut: res.usage.output_tokens, autoContextChars: ctxPrefix.length, compactedTurns: compacted.compactedTurns });
       } catch (e) {
         // .5231 (bughunt-confirmed) — pop the orphaned user turn so a failed send doesn't leave two
         // consecutive user roles in history → next send 400s "roles must alternate" and bricks the chat.
@@ -797,6 +974,7 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
           panel.webview.postMessage({ type: 'error', error: 'Only one SCX key available (SCX_API_KEY). Set SCX_API_KEY_2..9 in HKCU or run Switch-KritScxKey.' });
         } else {
           _keyRotation = (_keyRotation + 1) % cfg.apiKeys.length;
+          saveKeyRotation(_keyRotation);   // .5231b (re-hunt) — persist so the selection survives restart
           panel.webview.postMessage({ type: 'keySwitched', newKeyIndex: _keyRotation + 1 });
         }
       } catch (e) {
@@ -811,6 +989,7 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
         canSelectMany: !folder, canSelectFiles: !folder, canSelectFolders: folder,
         openLabel: folder ? 'Attach this folder to SCXCode' : 'Attach file(s) to SCXCode',
         title: folder ? 'Select a folder (read recursively)' : 'Select one or more files',
+        defaultUri: getAttachmentDialogDefaultUri(),
       });
       if (picked && picked.length) {
         const { block, fileCount, chars } = await collectAttachments(picked);
@@ -840,6 +1019,878 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
     }
   });
   panel.webview.postMessage({ type: 'ready' });
+}
+
+// ────────────────────────────────────────────────────────────────
+// .5231 — Kritical Lens "Looking Glass" webview.
+// Turns the standalone lens-looking-glass.html prototype into a REAL panel fed by
+// the local SQLite corpus store (~/.kritical-scx/scxcode-store.db). The webview posts
+// {type:'lensQuery'} on load; the host reads files + symbols from the store (read-only)
+// and posts {type:'lensData', files, symbols} back. Findings still use sample rows for
+// now — wiring dbo.v_LensFindings (SQL Server) is the next step (see FINDINGS below).
+// ────────────────────────────────────────────────────────────────
+
+// .5231 — the Looking Glass webview markup (prototype adapted for a real webview + store bridge).
+// %%NONCE%% is substituted per-render. Kept as a single template literal so it bundles into out/extension.js.
+// Identity preserved from the prototype: Southern Cross starfield, frosted glass cards, navy #13365C / cyan #15AFD1.
+const LOOKING_GLASS_HTML = String.raw`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kritical Lens — Looking Glass</title>
+<style nonce="%%NONCE%%">
+  /* ============================================================
+     Kritical Lens — Looking Glass (.5231)
+     Real VS Code webview. Corpus + symbols are LIVE from the local
+     SQLite store (~/.kritical-scx/scxcode-store.db); findings are
+     still prototype samples (v_LensFindings wiring is next).
+     Identity mirrors src/extension.ts: Southern Cross starfield,
+     frosted glass cards, Kritical navy #13365C + cyan #15AFD1.
+     ============================================================ */
+  :root{
+    --k-navy:#13365C; --k-navy2:#0d2440; --k-navy3:#0a1c33;
+    --k-cyan:#15AFD1; --k-cyan-dim:#15afd155; --k-cyan-faint:#15afd122;
+    --k-ok:#3fb950; --k-warn:#e3b341; --k-err:#d72638;
+    --ink:#dfeefa; --ink-dim:#93b4cc; --ink-faint:#6a8aa3;
+    --panel:rgba(14,32,54,.55); --panel-solid:#0f2138;
+    --bd:#1d4160; --bd-hi:#2b608a;
+    --glass-blur:14px;
+    --mono:'Cascadia Code',ui-monospace,'SF Mono',Consolas,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:var(--sans); color:var(--ink);
+    background:
+      radial-gradient(1200px 700px at 78% -8%, #163a63 0%, transparent 60%),
+      linear-gradient(160deg,var(--k-navy3) 0%, #071527 55%, #050f1c 100%);
+    overflow:hidden;
+  }
+  #sky{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0;pointer-events:none}
+  .app{position:relative;z-index:1;height:100vh;display:flex;flex-direction:column}
+
+  /* ---- header / hero ---- */
+  header{
+    display:flex;align-items:center;gap:14px;padding:14px 22px;
+    border-bottom:1px solid var(--k-cyan);
+    background:linear-gradient(135deg, rgba(13,36,64,.85), rgba(10,28,51,.7) 60%, rgba(10,28,51,.55));
+    backdrop-filter:blur(6px);
+  }
+  .logo{width:40px;height:40px;flex:0 0 auto;border-radius:10px;box-shadow:0 2px 12px #15afd140}
+  .brand h1{margin:0;font-size:18px;letter-spacing:.3px;font-weight:700}
+  .brand .sub{font-size:11px;color:var(--k-cyan);letter-spacing:.6px;text-transform:uppercase}
+  .hstats{margin-left:auto;display:flex;gap:9px;flex-wrap:wrap}
+  .pill{
+    display:flex;align-items:center;gap:6px;background:#00000040;
+    border:1px solid var(--k-cyan-dim);border-radius:20px;padding:5px 12px;
+    font:11px/1 var(--mono);color:#bfe9f5;white-space:nowrap;
+  }
+  .pill b{color:#fff;font-weight:700}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--k-ok);box-shadow:0 0 6px var(--k-ok)}
+  .pill .dot.off{background:var(--k-warn);box-shadow:0 0 6px var(--k-warn)}
+
+  /* ---- tabs ---- */
+  .tabs{display:flex;gap:4px;padding:10px 22px 0}
+  .tab{
+    font:12px/1 var(--sans);font-weight:600;letter-spacing:.3px;color:var(--ink-dim);
+    background:transparent;border:1px solid transparent;border-bottom:none;
+    padding:9px 16px;border-radius:10px 10px 0 0;cursor:pointer;transition:.15s;
+  }
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:#fff;background:var(--panel);border-color:var(--bd);border-bottom:1px solid transparent;
+    box-shadow:0 -2px 12px #15afd11f}
+  .tab .cnt{margin-left:7px;font:10px/1 var(--mono);color:var(--k-cyan);opacity:.85}
+
+  main{flex:1;min-height:0;padding:0 22px 18px;display:flex}
+  .pane{display:none;flex:1;min-height:0}
+  .pane.active{display:flex;gap:16px}
+
+  /* ---- glass card ---- */
+  .card{
+    background:var(--panel);border:1px solid var(--bd);border-radius:14px;
+    backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));
+    box-shadow:0 8px 34px #0006, inset 0 1px 0 #ffffff0a;
+    display:flex;flex-direction:column;min-height:0;overflow:hidden;
+  }
+  .card > .card-h{
+    padding:13px 16px;border-bottom:1px solid var(--bd);
+    display:flex;align-items:center;gap:10px;flex:0 0 auto;
+    background:linear-gradient(180deg,#ffffff08,transparent);
+  }
+  .card-h h2{margin:0;font-size:13px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#cfe9f6}
+  .card-h .meta{margin-left:auto;font:11px/1 var(--mono);color:var(--ink-faint)}
+  .card-body{flex:1;min-height:0;overflow:auto}
+  .card-body::-webkit-scrollbar{width:10px;height:10px}
+  .card-body::-webkit-scrollbar-thumb{background:#1d4160;border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+  .card-body::-webkit-scrollbar-thumb:hover{background:#2b608a}
+
+  /* ---- search ---- */
+  .search{position:relative;flex:1}
+  .search input{
+    width:100%;background:#08192c;border:1px solid var(--bd-hi);border-radius:9px;
+    color:var(--ink);font:13px/1 var(--sans);padding:9px 12px 9px 32px;outline:none;transition:.15s;
+  }
+  .search input:focus{border-color:var(--k-cyan);box-shadow:0 0 0 3px var(--k-cyan-faint)}
+  .search svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);opacity:.6}
+
+  /* ============ CORPUS PANE ============ */
+  .col-files{flex:0 0 46%;max-width:46%}
+  .col-detail{flex:1}
+  .file-row{
+    display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:center;
+    padding:9px 15px;border-bottom:1px solid #ffffff08;cursor:pointer;transition:.1s;
+  }
+  .file-row:hover{background:#15afd10f}
+  .file-row.sel{background:#15afd11c;box-shadow:inset 3px 0 0 var(--k-cyan)}
+  .file-row .lang{font:10px/1 var(--mono);text-transform:uppercase;padding:3px 5px;border-radius:5px;text-align:center}
+  .file-row .path{font:12.5px/1.3 var(--mono);color:var(--ink);word-break:break-all}
+  .file-row .path .dir{color:var(--ink-faint)}
+  .file-row .path b{color:#eaf6ff;font-weight:600}
+  .file-row .loc{font:10.5px/1 var(--mono);color:var(--ink-faint);white-space:nowrap}
+  .lang-ts{background:#2b4b7a;color:#a9c8ff} .lang-mjs{background:#5a4a1f;color:#f0d98a}
+  .lang-js{background:#5a4a1f;color:#f0d98a} .lang-py{background:#1f5a4a;color:#8af0c8}
+  .lang-ps1{background:#3a2b5a;color:#c8a9ff} .lang-psm1{background:#3a2b5a;color:#c8a9ff}
+  .lang-md{background:#2a3f52;color:#a9c8dd} .lang-json{background:#4a2b3a;color:#f0a9c8}
+  .lang-sql{background:#4a3a1f;color:#f0c88a} .lang-cjs{background:#5a4a1f;color:#f0d98a}
+  .lang-toml{background:#3a2b2b;color:#f0b8a9}
+
+  .detail-head{padding:15px 16px;border-bottom:1px solid var(--bd)}
+  .detail-head .fp{font:13px/1.4 var(--mono);color:#eaf6ff;word-break:break-all}
+  .detail-head .badges{margin-top:9px;display:flex;gap:7px;flex-wrap:wrap}
+  .badge{font:10.5px/1 var(--mono);padding:4px 8px;border-radius:6px;border:1px solid var(--bd-hi);color:var(--ink-dim);background:#08192c}
+  .badge b{color:#eaf6ff}
+  .code{
+    margin:0;padding:14px 16px;font:12px/1.55 var(--mono);color:#bcd6e8;
+    white-space:pre;tab-size:2;
+  }
+  .code .ln{color:#3f5f78;user-select:none;display:inline-block;width:3.2em;text-align:right;margin-right:14px}
+  .code .kw{color:#4fb8e8} .code .str{color:#8af0c8} .code .com{color:#5a7288;font-style:italic}
+  .code .fn{color:#f0d98a} .code .sym-hi{background:#15afd130;border-radius:3px;box-shadow:0 0 0 1px #15afd155}
+
+  /* ============ SYMBOLS PANE ============ */
+  .col-symlist{flex:0 0 42%;max-width:42%}
+  .sym-row{
+    display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;
+    padding:8px 15px;border-bottom:1px solid #ffffff08;cursor:pointer;transition:.1s;
+  }
+  .sym-row:hover{background:#15afd10f}
+  .sym-row.sel{background:#15afd11c;box-shadow:inset 3px 0 0 var(--k-cyan)}
+  .sym-row .nm{font:12.5px/1.2 var(--mono);color:#eaf6ff}
+  .sym-row .kind{font:9.5px/1 var(--mono);text-transform:uppercase;padding:3px 6px;border-radius:5px}
+  .kind-function{background:#1f4a5a;color:#8ad8f0}
+  .kind-class{background:#4a2b5a;color:#d8a9ff}
+  .sym-row .loc{grid-column:1;font:10.5px/1 var(--mono);color:var(--ink-faint);margin-top:3px}
+  .sym-empty{padding:30px;text-align:center;color:var(--ink-faint);font-size:13px}
+
+  /* graph */
+  .graph-wrap{flex:1;min-height:0;position:relative}
+  #graph{width:100%;height:100%;display:block}
+  .graph-legend{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;font:11px/1 var(--mono);color:var(--ink-dim)}
+  .graph-legend span{display:flex;align-items:center;gap:6px}
+  .graph-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* ============ FINDINGS PANE ============ */
+  .findings-col{flex:1;display:flex;flex-direction:column;gap:14px;min-height:0}
+  .toggle-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .seg{display:inline-flex;background:#08192c;border:1px solid var(--bd-hi);border-radius:10px;padding:3px;gap:2px}
+  .seg button{
+    font:11.5px/1 var(--mono);font-weight:600;letter-spacing:.4px;
+    color:var(--ink-dim);background:transparent;border:0;padding:8px 15px;border-radius:8px;cursor:pointer;transition:.15s;
+  }
+  .seg button:hover{color:var(--ink)}
+  .seg button.on{color:#04222c;background:linear-gradient(135deg,var(--k-cyan),#0f8bad);box-shadow:0 2px 10px #15afd150}
+  .seg button.on.det{background:linear-gradient(135deg,#3fb950,#2b8a3c);box-shadow:0 2px 10px #3fb95050}
+  .seg button.on.inf{background:linear-gradient(135deg,#c88af0,#8a4ad8);box-shadow:0 2px 10px #8a4ad850}
+  .class-note{font:11px/1.4 var(--mono);color:var(--ink-faint);flex:1;min-width:160px}
+  .class-note b.det{color:#8af0c8} .class-note b.inf{color:#d8a9ff}
+
+  .find{
+    padding:12px 16px;border-bottom:1px solid #ffffff08;display:grid;
+    grid-template-columns:auto 1fr;gap:12px;align-items:start;
+  }
+  .find:hover{background:#ffffff05}
+  .sev{width:8px;align-self:stretch;border-radius:4px;margin-top:2px;min-height:38px}
+  .sev-high{background:var(--k-err);box-shadow:0 0 8px #d7263866}
+  .sev-med{background:var(--k-warn);box-shadow:0 0 8px #e3b34155}
+  .sev-low{background:var(--ink-faint)}
+  .find .top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .find .rule{font:12px/1 var(--mono);color:#eaf6ff;font-weight:600}
+  .find .tool{font:10px/1 var(--mono);padding:3px 7px;border-radius:5px;background:#08192c;border:1px solid var(--bd-hi);color:var(--k-cyan)}
+  .find .cls{font:9.5px/1 var(--mono);text-transform:uppercase;padding:3px 7px;border-radius:5px;letter-spacing:.5px}
+  .cls-deterministic{background:#12331f;color:#7ce0a0;border:1px solid #2b8a3c66}
+  .cls-inference{background:#2a1a3a;color:#d0a0f0;border:1px solid #8a4ad866}
+  .find .where{font:10.5px/1 var(--mono);color:var(--ink-faint);margin-left:auto}
+  .find .msg{font:12px/1.5;color:var(--ink-dim);margin-top:3px}
+  .find .tag{font:10px/1 var(--mono);color:var(--ink-faint);margin-top:5px}
+  .find .tag b{color:var(--k-cyan)}
+  /* confidence bar */
+  .conf{margin-top:7px;display:flex;align-items:center;gap:9px}
+  .conf .track{flex:1;height:7px;background:#08192c;border-radius:5px;overflow:hidden;border:1px solid #1d416088}
+  .conf .fill{height:100%;border-radius:5px;transition:width .4s cubic-bezier(.2,.8,.2,1)}
+  .conf .fill.det{background:linear-gradient(90deg,#2b8a3c,#3fb950)}
+  .conf .fill.inf{background:linear-gradient(90deg,#8a4ad8,#c88af0)}
+  .conf .val{font:11px/1 var(--mono);color:var(--ink);width:34px;text-align:right;font-weight:700}
+  .conf .cap{font:9.5px/1 var(--mono);color:var(--ink-faint)}
+
+  .summary{display:flex;gap:10px;flex-wrap:wrap}
+  .sum-card{
+    flex:1;min-width:120px;background:#08192c88;border:1px solid var(--bd);border-radius:11px;padding:12px 14px;
+  }
+  .sum-card .n{font:22px/1 var(--mono);font-weight:700;color:#fff}
+  .sum-card .l{font:10.5px/1.3 var(--mono);color:var(--ink-faint);text-transform:uppercase;letter-spacing:.5px;margin-top:5px}
+  .sum-card.det .n{color:#7ce0a0} .sum-card.inf .n{color:#d0a0f0}
+  .sum-card.high .n{color:#f07a86}
+
+  .foot{padding:6px 22px;font:10.5px/1.4 var(--mono);color:var(--ink-faint);border-top:1px solid var(--bd);
+    display:flex;gap:16px;flex-wrap:wrap;background:#0a1c3399;backdrop-filter:blur(6px)}
+  .foot b{color:var(--k-cyan)}
+  .empty{padding:40px;text-align:center;color:var(--ink-faint)}
+  .empty h3{color:var(--ink);margin:0 0 10px;font-size:15px}
+  .empty code{background:#08192c;border:1px solid var(--bd-hi);border-radius:6px;padding:2px 7px;color:var(--k-cyan);font:12px/1.6 var(--mono)}
+  .empty .cmd{display:block;margin:14px auto;max-width:560px;text-align:left;background:#08192c;border:1px solid var(--bd);border-radius:9px;padding:12px 14px;font:12px/1.7 var(--mono);color:#bcd6e8;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<div class="app">
+
+  <header>
+    <svg class="logo" viewBox="0 0 128 128"><rect width="128" height="128" rx="18" fill="#13365C"/><path d="M28 24 L28 104 L44 104 L44 72 L68 104 L88 104 L58 62 L86 24 L66 24 L44 54 L44 24 Z" fill="#fff"/></svg>
+    <div class="brand">
+      <h1>Kritical Lens — Looking Glass</h1>
+      <div class="sub">One glass · the whole indexed corpus · .5231</div>
+    </div>
+    <div class="hstats" id="hstats"></div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-pane="corpus">Corpus <span class="cnt" id="tc-files"></span></button>
+    <button class="tab" data-pane="symbols">Symbol Graph <span class="cnt" id="tc-syms"></span></button>
+    <button class="tab" data-pane="findings">Findings <span class="cnt" id="tc-finds"></span></button>
+  </div>
+
+  <main>
+    <!-- ===================== CORPUS ===================== -->
+    <section class="pane active" data-pane="corpus">
+      <div class="card col-files">
+        <div class="card-h">
+          <div class="search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8fb9d4" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input id="fileSearch" placeholder="Search corpus — path or content (LIKE %term%) …" autocomplete="off"/>
+          </div>
+          <div class="meta" id="fileCount"></div>
+        </div>
+        <div class="card-body" id="fileList"></div>
+      </div>
+      <div class="card col-detail">
+        <div class="card-h"><h2>File</h2><div class="meta">files.content · byte-exact source</div></div>
+        <div class="card-body" id="fileDetail"><div class="empty">Looking through the glass …</div></div>
+      </div>
+    </section>
+
+    <!-- ===================== SYMBOLS ===================== -->
+    <section class="pane" data-pane="symbols">
+      <div class="card col-symlist">
+        <div class="card-h">
+          <div class="search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8fb9d4" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input id="symSearch" placeholder="Search symbols — name LIKE %term% …" autocomplete="off"/>
+          </div>
+          <div class="meta" id="symCount"></div>
+        </div>
+        <div class="card-body" id="symList"></div>
+      </div>
+      <div class="card col-detail">
+        <div class="card-h"><h2>Symbol Graph</h2><div class="meta" id="graphMeta">click a symbol to center its call graph</div></div>
+        <div class="graph-wrap">
+          <canvas id="graph"></canvas>
+          <div class="graph-legend">
+            <span><i style="background:#15AFD1"></i>selected</span>
+            <span><i style="background:#3fb950"></i>same file</span>
+            <span><i style="background:#c88af0"></i>call edge</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FINDINGS ===================== -->
+    <section class="pane" data-pane="findings">
+      <div class="findings-col">
+        <div class="card" style="flex:0 0 auto">
+          <div class="card-h"><h2>v_LensFindings</h2><div class="meta">deterministic (fact / conf 100) &nbsp;·&nbsp; inference (AI / graded)</div></div>
+          <div class="card-body" style="padding:14px 16px">
+            <div class="summary" id="findSummary"></div>
+            <div class="toggle-row" style="margin-top:14px">
+              <div class="seg" id="clsSeg">
+                <button data-cls="all" class="on">All</button>
+                <button data-cls="deterministic" class="det">Deterministic</button>
+                <button data-cls="inference" class="inf">Inference</button>
+              </div>
+              <div class="seg" id="sevSeg">
+                <button data-sev="all" class="on">All sev</button>
+                <button data-sev="high">High</button>
+                <button data-sev="med">Med</button>
+                <button data-sev="low">Low</button>
+              </div>
+              <div class="class-note" id="clsNote"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card" style="flex:1;min-height:0">
+          <div class="card-h"><h2>Findings</h2><div class="meta" id="findCount"></div></div>
+          <div class="card-body" id="findList"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="foot">
+    <span>Corpus + symbols <b>LIVE</b> from the selected store · findings are prototype samples</span>
+    <span>storage <b id="footBackend">auto</b> · <b id="footDb">~/.kritical-scx/scxcode-store.db</b></span>
+    <span>SQLite <b>files/symbols</b> · SQL Server <b>dbo.LensSource</b> / <b>dbo.LensSymbol</b></span>
+    <span id="footRepo"></span>
+  </div>
+</div>
+
+<script nonce="%%NONCE%%">
+/* ============================================================
+   .5231 — the ONLY data seam. Corpus + symbols arrive from the
+   extension host over postMessage ({type:'lensData', files, symbols});
+   findings stay as prototype samples until dbo.v_LensFindings is wired.
+   Local store cols:  files(path,lang,loc,fn_count,content)  symbols(path,name,kind,line)
+   ============================================================ */
+const vscode = acquireVsCodeApi();
+let FILES = [];        // populated from the store
+let SYMBOLS = [];      // populated from the store
+let EDGES = [];        // derived heuristically from the loaded corpus (see buildEdges)
+
+/* v_LensFindings rows — tool drives detection_class + confidence.
+   .5231 NOTE: these remain PROTOTYPE SAMPLES. The next step is to have the host
+   read dbo.v_LensFindings (SQL Server) and post them the same way as lensData. */
+const DET_TOOLS = new Set(['psscriptanalyzer','semgrep','npm-audit','secret-grep','danger-grep','gitleaks','detect-secrets','osv']);
+const RAW_FINDINGS = [
+  // ---- deterministic (parser/tool facts) ----
+  {path:"install/Install-KritScxLiteLLM.ps1", tool:"psscriptanalyzer", severity:"high", rule:"PSUseDeclaredVarsMoreThanAssignments", line:22, message:"Assigning the read-only automatic variable $pid throws; breaks Get-KritLiteLLMPid.", inference_tag:"static-lint"},
+  {path:"ps-module/Kritical.PS.SCXCode.psm1", tool:"psscriptanalyzer", severity:"med", rule:"PSAvoidNullOrEmptyHelpMessageAttribute", line:88, message:"$currentKey.Substring(0,8) throws when the key is null or shorter than 8 chars.", inference_tag:"static-lint"},
+  {path:"src/extension.ts", tool:"semgrep", severity:"high", rule:"javascript.https.no-content-length", line:190, message:"HTTP body written without a Content-Length header; some servers reject or truncate the request.", inference_tag:"static-lint"},
+  {path:"codex-wrapper/scx-agentic-shim.mjs", tool:"semgrep", severity:"med", rule:"javascript.regex.dynamic-json-test", line:69, message:"isPlanGateError JSON.stringifies the whole body per call; regex over stringified object is fragile.", inference_tag:"static-lint"},
+  {path:"lens/Invoke-KritScxSecurityMine.py", tool:"secret-grep", severity:"high", rule:"hardcoded-secret-pattern", line:81, message:"Secret-shaped assignment matched: (api_key|secret|token|password) = '<12+ chars>'.", inference_tag:"regex-secret"},
+  {path:"src/package.json", tool:"npm-audit", severity:"med", rule:"GHSA-xxxx-transitive", line:0, message:"Transitive dependency advisory (moderate) in a build-time package.", inference_tag:"osv-advisory"},
+  {path:"litellm/kritical_scx_logger.py", tool:"detect-secrets", severity:"low", rule:"KeywordDetector", line:14, message:"Keyword 'token' near a string literal — flagged for manual triage.", inference_tag:"entropy-scan"},
+  {path:"node-agent/src/server.mjs", tool:"gitleaks", severity:"low", rule:"generic-api-key", line:112, message:"Low-entropy match near 'apiKey'; likely a placeholder, verify.", inference_tag:"regex-secret"},
+  {path:"store-mcp/kritical-local-store.mjs", tool:"semgrep", severity:"low", rule:"javascript.sqli.string-concat-where", line:75, message:"WHERE clause built by string join; parameters are bound (?) so low risk, but pattern flagged.", inference_tag:"static-lint"},
+  // ---- inference (AI-graded opinions, DeepSeek security review) ----
+  {path:"src/extension.ts", tool:"deepseek-v3.1", severity:"high", rule:"key-rotation-dedup", line:44, message:"If process.env.SCX_API_KEY equals one of SCX_API_KEY_2..9, the primary key can be added twice; dedup only guards the secondary array, not primary vs secondaries.", inference_tag:"ai-review:logic"},
+  {path:"src/extension.ts", tool:"deepseek-v3.1", severity:"high", rule:"env-ref-substitution", line:39, message:"The regex /^\${env:SCX_API_KEY}$/ only matches the exact literal; any other value leaves the raw env-reference string in place instead of the resolved key.", inference_tag:"ai-review:logic"},
+  {path:"codex-wrapper/scx-agentic-shim.mjs", tool:"deepseek-v3.1", severity:"med", rule:"retry-telemetry-drift", line:100, message:"A failed plan-gate retry could stream an opaque byte-reader error; telemetry tools_out/flattened reflected the first attempt, not the retried server-tools-dropped payload.", inference_tag:"ai-review:robustness"},
+  {path:"mux/Invoke-KritScxSyntheticContext.py", tool:"gpt-oss-120b", severity:"high", rule:"stream-error-isolation", line:44, message:"Without per-stream try/except, one stream's HTTPError re-raised through ex.map and discarded all successful streams; synthesise from survivors instead.", inference_tag:"ai-review:robustness"},
+  {path:"mux/Invoke-KritScxSyntheticContext.py", tool:"gpt-oss-120b", severity:"med", rule:"context-cap-underrun", line:170, message:"Context cap of 11000 chars (~2.7k tokens) is far under the real gpt-oss-120b ~108k ceiling — wastes usable window.", inference_tag:"ai-review:perf"},
+  {path:"codex-wrapper/kritical-codex.ps1", tool:"deepseek-v3.1", severity:"high", rule:"pid-identity-check", line:86, message:"Kill-switch force-killed whatever owned :4199 at teardown; without an identity check it could nuke an innocent process. Track the launched PID.", inference_tag:"ai-review:safety"},
+  {path:"lens/Invoke-KritScxSourceIngest.py", tool:"deepseek-v3.1", severity:"high", rule:"byte-exact-illusion", line:78, message:"'byte-exact' storage decoded utf-8/replace into NVARCHAR; the reassembly proof compared lossy-vs-lossy (same U+FFFD both sides) so it always passed; stored_sha was never checked.", inference_tag:"ai-review:correctness"},
+  {path:"install/Install-KriticalSCX.ps1", tool:"deepseek-v3.1", severity:"med", rule:"litellm-status-predicate", line:120, message:"'litellm installed' status reused the venv-exists predicate — reports green even when litellm is absent. Drive it off an actual import litellm.", inference_tag:"ai-review:correctness"},
+  {path:"lens/Invoke-KritScxCorpusMine.py", tool:"deepseek-v3.1", severity:"low", rule:"callgraph-comment-fp", line:80, message:"Call-graph edge matcher false-positives inside comments and string literals; edges may be over-counted.", inference_tag:"ai-review:precision"},
+  {path:"safety/Restore-WorkingClaude.ps1", tool:"minimax-m2.7", severity:"low", rule:"blind-port-kill", line:31, message:"Rescue script force-killed the :4180 owner with no identity check; restrict to a python/litellm owner.", inference_tag:"ai-review:safety"}
+];
+const FINDINGS = RAW_FINDINGS.map(f => {
+  const det = DET_TOOLS.has(f.tool);
+  const conf = det ? 100 : (f.severity==='high'?60 : f.severity==='med'?45 : 30);
+  return {...f, detection_class: det?'deterministic':'inference', confidence: conf};
+});
+
+let REPO = "Kritical.SCXCode";
+
+/* ============================================================
+   RENDERING
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function splitPath(p){ const i=p.lastIndexOf('/'); return i<0 ? ['',p] : [p.slice(0,i+1), p.slice(i+1)]; }
+
+/* .5231 — derive lightweight call-graph edges from the loaded corpus so the graph view
+   has real neighbours: for each symbol, find OTHER symbols whose name appears in this
+   file's content (a cheap "references" heuristic). Deterministic; no external miner needed. */
+function buildEdges(){
+  EDGES = [];
+  const byPath = {};
+  FILES.forEach(f => { byPath[f.path] = f.content || ''; });
+  const symByName = {};
+  SYMBOLS.forEach(s => { (symByName[s.name] = symByName[s.name] || []).push(s); });
+  const names = Object.keys(symByName).filter(n => n.length >= 3);
+  SYMBOLS.forEach(src => {
+    const content = byPath[src.path] || '';
+    if (!content) return;
+    for (const nm of names) {
+      if (nm === src.name) continue;
+      // word-boundary-ish match, skip self-file duplicates handled by graph 'same file'
+      if (content.indexOf(nm) !== -1) {
+        const re = new RegExp('\\b' + nm.replace(/[.*+?^\${}()|[\]\\-]/g,'\\$&') + '\\b');
+        if (re.test(content)) EDGES.push({ from: src.name, to: nm });
+      }
+    }
+  });
+  // cap runaway edges from very common names
+  if (EDGES.length > 600) EDGES = EDGES.slice(0, 600);
+}
+
+/* ---- header stats + tab counts ---- */
+function initStats(){
+  const totLoc = FILES.reduce((a,f)=>a+(f.loc||0),0);
+  $('#hstats').innerHTML =
+    '<span class="pill"><span class="dot" id="storeDot"></span>store <b id="storeState">online</b></span>'+
+    '<span class="pill">files <b>'+FILES.length+'</b></span>'+
+    '<span class="pill">symbols <b>'+SYMBOLS.length+'</b></span>'+
+    '<span class="pill">loc <b>'+totLoc.toLocaleString()+'</b></span>'+
+    '<span class="pill">findings <b>'+FINDINGS.length+'</b></span>';
+  $('#tc-files').textContent = FILES.length;
+  $('#tc-syms').textContent = SYMBOLS.length;
+  $('#tc-finds').textContent = FINDINGS.length;
+  $('#footRepo').innerHTML = 'repo <b>'+esc(REPO)+'</b>';
+}
+
+/* ---- tabs ---- */
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(z=>z.classList.remove('active'));
+  document.querySelectorAll('.pane').forEach(z=>z.classList.remove('active'));
+  t.classList.add('active');
+  document.querySelector('.pane[data-pane="'+t.dataset.pane+'"]').classList.add('active');
+  if (t.dataset.pane==='symbols') requestAnimationFrame(drawGraph);
+});
+
+/* ================= CORPUS ================= */
+let fileSel = null;
+function highlight(text){
+  return esc(text)
+    .replace(/(&#x2F;&#x2F;|#).*$/gm, m=>'<span class="com">'+m+'</span>')
+    .replace(/\b(function|const|let|var|return|async|await|export|import|class|def|if|for|while|new|from)\b/g, '<span class="kw">$1</span>')
+    .replace(/(['"\x60])(?:\\.|(?!\1).)*\1/g, m=>'<span class="str">'+m+'</span>');
+}
+function renderFileDetail(f){
+  const lines = (f.content||'').split('\n');
+  const numbered = lines.map((ln,i)=>'<span class="ln">'+(i+1)+'</span>'+highlight(ln)).join('\n');
+  const [dir,base]=splitPath(f.path);
+  $('#fileDetail').innerHTML =
+    '<div class="detail-head">'+
+       '<div class="fp"><span style="color:var(--ink-faint)">'+esc(dir)+'</span><b style="color:#eaf6ff">'+esc(base)+'</b></div>'+
+       '<div class="badges">'+
+         '<span class="badge lang-'+esc(f.lang)+'" style="border:0">'+esc((f.lang||'').toUpperCase())+'</span>'+
+         '<span class="badge">loc <b>'+(f.loc||0)+'</b></span>'+
+         '<span class="badge">fns <b>'+(f.fns||0)+'</b></span>'+
+         '<span class="badge">symbols <b>'+SYMBOLS.filter(s=>s.path===f.path).length+'</b></span>'+
+         '<span class="badge">findings <b>'+FINDINGS.filter(x=>x.path===f.path).length+'</b></span>'+
+       '</div>'+
+     '</div>'+
+     '<pre class="code">'+numbered+'</pre>';
+}
+function renderFileList(q){
+  q=(q||'').toLowerCase().trim();
+  const terms=q.split(/\s+/).filter(Boolean);
+  const rows = FILES.filter(f=>{
+    if(!terms.length) return true;
+    const hay=(f.path+'\n'+(f.content||'')).toLowerCase();
+    return terms.every(t=>hay.includes(t));   // path LIKE %t% OR content LIKE %t%
+  });
+  $('#fileCount').textContent = rows.length+' / '+FILES.length;
+  if(!rows.length){ $('#fileList').innerHTML='<div class="empty">No files match.</div>'; return; }
+  $('#fileList').innerHTML = rows.map(f=>{
+    const [dir,base]=splitPath(f.path);
+    return '<div class="file-row '+(f===fileSel?'sel':'')+'" data-path="'+esc(f.path)+'">'+
+       '<span class="lang lang-'+esc(f.lang)+'">'+esc(f.lang)+'</span>'+
+       '<span class="path"><span class="dir">'+esc(dir)+'</span><b>'+esc(base)+'</b></span>'+
+       '<span class="loc">'+(f.loc||0)+' loc</span></div>';
+  }).join('');
+  document.querySelectorAll('#fileList .file-row').forEach(r=>r.onclick=()=>{
+    fileSel = FILES.find(f=>f.path===r.dataset.path);
+    document.querySelectorAll('#fileList .file-row').forEach(z=>z.classList.remove('sel'));
+    r.classList.add('sel'); renderFileDetail(fileSel);
+  });
+}
+$('#fileSearch').addEventListener('input', e=>renderFileList(e.target.value));
+
+/* ================= SYMBOLS + GRAPH ================= */
+let symSel = null;
+function renderSymList(q){
+  q=(q||'').toLowerCase().trim();
+  const rows = SYMBOLS.filter(s=>!q || s.name.toLowerCase().includes(q));   // name LIKE %q%
+  $('#symCount').textContent = rows.length+' / '+SYMBOLS.length;
+  if(!rows.length){ $('#symList').innerHTML='<div class="sym-empty">No symbols match.</div>'; return; }
+  $('#symList').innerHTML = rows.slice(0,400).map(s=>{
+    const [dir,base]=splitPath(s.path);
+    return '<div class="sym-row '+(s===symSel?'sel':'')+'" data-name="'+esc(s.name)+'" data-path="'+esc(s.path)+'">'+
+       '<span class="nm">'+esc(s.name)+'</span>'+
+       '<span class="kind kind-'+esc(s.kind)+'">'+esc(s.kind)+'</span>'+
+       '<span class="loc"><span style="opacity:.7">'+esc(dir)+'</span>'+esc(base)+'<span style="color:var(--k-cyan)">:'+s.line+'</span></span>'+
+     '</div>';
+  }).join('');
+  document.querySelectorAll('#symList .sym-row').forEach(r=>r.onclick=()=>{
+    symSel = SYMBOLS.find(s=>s.name===r.dataset.name && s.path===r.dataset.path);
+    document.querySelectorAll('#symList .sym-row').forEach(z=>z.classList.remove('sel'));
+    r.classList.add('sel'); requestAnimationFrame(drawGraph);
+  });
+}
+$('#symSearch').addEventListener('input', e=>renderSymList(e.target.value));
+
+/* ---- call graph (center selected symbol; neighbours = call edges) ---- */
+const gc = $('#graph'); let gctx;
+function drawGraph(){
+  if(!gc.offsetWidth) return;
+  const dpr = window.devicePixelRatio||1;
+  const W=gc.width=gc.offsetWidth*dpr, H=gc.height=gc.offsetHeight*dpr;
+  gctx=gc.getContext('2d'); gctx.clearRect(0,0,W,H);
+  const cx=W/2, cy=H/2;
+  if(!symSel){
+    gctx.fillStyle='#6a8aa3'; gctx.font=(13*dpr)+'px monospace'; gctx.textAlign='center';
+    gctx.fillText('Select a symbol to center its call graph', cx, cy);
+    $('#graphMeta').textContent='click a symbol to center its call graph';
+    return;
+  }
+  const name=symSel.name;
+  const outN = EDGES.filter(e=>e.from===name).map(e=>({name:e.to, dir:'out'}));
+  const inN  = EDGES.filter(e=>e.to===name).map(e=>({name:e.from, dir:'in'}));
+  const sameFile = SYMBOLS.filter(s=>s.path===symSel.path && s.name!==name).slice(0,6).map(s=>({name:s.name, dir:'file'}));
+  const seen=new Set([name]); const neigh=[];
+  [...outN,...inN,...sameFile].forEach(n=>{ if(!seen.has(n.name)){seen.add(n.name); neigh.push(n);} });
+  neigh.length = Math.min(neigh.length, 14); // keep the ring readable
+  $('#graphMeta').textContent = name+'() — '+outN.length+' refs out · '+inN.length+' referrers · '+sameFile.length+' in-file';
+
+  const R = Math.min(W,H)*0.33;
+  const pos = neigh.map((n,i)=>{ const a=-Math.PI/2 + i*(2*Math.PI/Math.max(neigh.length,1));
+    return {...n, x:cx+Math.cos(a)*R, y:cy+Math.sin(a)*R}; });
+  pos.forEach(p=>{
+    gctx.strokeStyle = p.dir==='file' ? 'rgba(63,185,80,.35)' : 'rgba(200,138,240,.55)';
+    gctx.lineWidth = (p.dir==='file'?1.2:1.8)*dpr;
+    gctx.beginPath(); gctx.moveTo(cx,cy); gctx.lineTo(p.x,p.y); gctx.stroke();
+    if(p.dir!=='file'){
+      const ang=Math.atan2(p.y-cy, p.x-cx), ex=p.x-Math.cos(ang)*22*dpr, ey=p.y-Math.sin(ang)*22*dpr;
+      gctx.fillStyle='rgba(200,138,240,.8)'; gctx.beginPath();
+      gctx.moveTo(ex,ey);
+      gctx.lineTo(ex-Math.cos(ang-0.4)*8*dpr, ey-Math.sin(ang-0.4)*8*dpr);
+      gctx.lineTo(ex-Math.cos(ang+0.4)*8*dpr, ey-Math.sin(ang+0.4)*8*dpr);
+      gctx.closePath(); gctx.fill();
+    }
+  });
+  pos.forEach(p=>drawNode(p.x,p.y,p.name, p.dir==='file'?'#3fb950':'#c88af0', false, dpr));
+  drawNode(cx,cy,name+'()','#15AFD1',true,dpr);
+}
+function drawNode(x,y,label,color,big,dpr){
+  const r=(big?9:6)*dpr;
+  const grd=gctx.createRadialGradient(x,y,0,x,y,r*3);
+  grd.addColorStop(0,color+'cc'); grd.addColorStop(1,color+'00');
+  gctx.fillStyle=grd; gctx.beginPath(); gctx.arc(x,y,r*3,0,6.29); gctx.fill();
+  gctx.fillStyle=color; gctx.beginPath(); gctx.arc(x,y,r,0,6.29); gctx.fill();
+  gctx.fillStyle=big?'#eaf6ff':'#cfe9f6'; gctx.font=((big?13:11)*dpr)+'px monospace';
+  gctx.textAlign='center'; gctx.textBaseline='top';
+  gctx.fillText(label, x, y+r+4*dpr);
+  gctx.textBaseline='alphabetic';
+}
+window.addEventListener('resize', ()=>{ if($('.pane[data-pane=symbols]').classList.contains('active')) requestAnimationFrame(drawGraph); });
+
+/* ================= FINDINGS ================= */
+let clsFilter='all', sevFilter='all';
+function renderFindSummary(){
+  const det=FINDINGS.filter(f=>f.detection_class==='deterministic');
+  const inf=FINDINGS.filter(f=>f.detection_class==='inference');
+  const high=FINDINGS.filter(f=>f.severity==='high');
+  const avgInf = Math.round(inf.reduce((a,f)=>a+f.confidence,0)/Math.max(inf.length,1));
+  $('#findSummary').innerHTML =
+    '<div class="sum-card"><div class="n">'+FINDINGS.length+'</div><div class="l">total findings</div></div>'+
+    '<div class="sum-card det"><div class="n">'+det.length+'</div><div class="l">deterministic · conf 100</div></div>'+
+    '<div class="sum-card inf"><div class="n">'+inf.length+'</div><div class="l">inference · avg '+avgInf+'</div></div>'+
+    '<div class="sum-card high"><div class="n">'+high.length+'</div><div class="l">high severity</div></div>';
+}
+function renderFindings(){
+  const rows=FINDINGS.filter(f=>
+    (clsFilter==='all'||f.detection_class===clsFilter) &&
+    (sevFilter==='all'||f.severity===sevFilter)
+  ).sort((a,b)=> (b.detection_class==='deterministic')-(a.detection_class==='deterministic') || b.confidence-a.confidence);
+  $('#findCount').textContent = rows.length+' shown';
+  if(!rows.length){ $('#findList').innerHTML='<div class="empty">No findings for this filter.</div>'; return; }
+  $('#findList').innerHTML = rows.map(f=>{
+    const det=f.detection_class==='deterministic';
+    const [dir,base]=splitPath(f.path);
+    return '<div class="find">'+
+      '<div class="sev sev-'+f.severity+'"></div>'+
+      '<div>'+
+        '<div class="top">'+
+          '<span class="rule">'+esc(f.rule)+'</span>'+
+          '<span class="tool">'+esc(f.tool)+'</span>'+
+          '<span class="cls cls-'+f.detection_class+'">'+f.detection_class+'</span>'+
+          '<span class="where"><span style="opacity:.6">'+esc(dir)+'</span>'+esc(base)+'<span style="color:var(--k-cyan)">:'+f.line+'</span></span>'+
+        '</div>'+
+        '<div class="msg">'+esc(f.message)+'</div>'+
+        '<div class="tag">inference_tag <b>'+esc(f.inference_tag)+'</b> · severity '+f.severity+'</div>'+
+        '<div class="conf">'+
+          '<span class="cap">confidence</span>'+
+          '<div class="track"><div class="fill '+(det?'det':'inf')+'" style="width:'+f.confidence+'%"></div></div>'+
+          '<span class="val">'+f.confidence+'</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+function updateClsNote(){
+  const map={
+    all:'Showing <b>both</b> classes. Deterministic = <b class="det">parser/tool facts</b> (conf 100); inference = <b class="inf">AI-graded opinions</b> (severity → 60/45/30).',
+    deterministic:'<b class="det">Deterministic</b> — PSScriptAnalyzer, semgrep, npm-audit, gitleaks, detect-secrets, osv & secret/danger greps. Reproducible facts, fixed confidence <b>100</b>.',
+    inference:'<b class="inf">Inference</b> — DeepSeek / gpt-oss / MiniMax security review. Model opinions, confidence graded by severity (high <b>60</b> · med <b>45</b> · low <b>30</b>).'
+  };
+  $('#clsNote').innerHTML = map[clsFilter];
+}
+document.querySelectorAll('#clsSeg button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#clsSeg button').forEach(z=>z.classList.remove('on'));
+  b.classList.add('on'); clsFilter=b.dataset.cls; updateClsNote(); renderFindings();
+});
+document.querySelectorAll('#sevSeg button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#sevSeg button').forEach(z=>z.classList.remove('on'));
+  b.classList.add('on'); sevFilter=b.dataset.sev; renderFindings();
+});
+
+/* ============================================================
+   .5231 — STORE BRIDGE. Ask the host for real corpus data on load,
+   then (re)render everything from it. Findings render immediately
+   (they're local samples) so the Findings tab is never blank.
+   ============================================================ */
+function renderAll(){
+  buildEdges();
+  initStats();
+  renderFileList('');
+  renderSymList('');
+  renderFindSummary(); updateClsNote(); renderFindings();
+}
+function showCorpusMessage(html){
+  $('#fileList').innerHTML = '';
+  $('#fileDetail').innerHTML = html;
+  $('#symList').innerHTML = '<div class="sym-empty">No symbols — the store has no data yet.</div>';
+  $('#fileCount').textContent = '0 / 0';
+  $('#symCount').textContent = '0 / 0';
+}
+function emptyStateHtml(reason, dbPath, backend){
+  const why = reason==='missing'
+    ? 'No selected corpus store was found at:'
+    : 'The selected corpus store exists but has no mined files/symbols yet:';
+  return '<div class="empty">'+
+    '<h3>The glass is empty</h3>'+
+    '<p>'+why+'</p>'+
+    '<p>Backend: <b>'+esc(backend||'auto')+'</b></p>'+
+    '<p><code>'+esc(dbPath||'~/.kritical-scx/scxcode-store.db')+'</code></p>'+
+    '<p>Populate it by mining a repo with SQLite or the SQL Server Lens ingest:</p>'+
+    '<div class="cmd">node store-mcp/kritical-local-store.mjs mine &lt;repoRoot&gt;\n\n'+
+    '# then reopen: Kritical SCX: Open Lens Looking Glass</div>'+
+    '<p style="margin-top:14px;color:var(--ink-faint)">SQLite reads files/symbols directly. SQL Server reads byte-exact dbo.LensSource content plus dbo.LensSymbol from KriticalSCXCodeStore.</p>'+
+    '</div>';
+}
+
+function getAttachmentDialogDefaultUri(): vscode.Uri {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (workspaceRoot) { return workspaceRoot; }
+  const home = os.homedir();
+  return vscode.Uri.file(home || process.cwd());
+}
+function markStore(state, dim){
+  const dot=$('#storeDot'), lbl=$('#storeState');
+  if(lbl) lbl.textContent = state;
+  if(dot) dot.className = 'dot' + (dim?' off':'');
+}
+
+window.addEventListener('message', ev => {
+  const m = ev.data || {};
+  if (m.type === 'lensData') {
+    FILES = m.files || [];
+    SYMBOLS = m.symbols || [];
+    if (m.backend) $('#footBackend').textContent = m.backend;
+    if (m.dbPath) $('#footDb').textContent = m.dbPath.replace(/\\/g,'/');
+    renderAll();
+    markStore('online', false);
+  } else if (m.type === 'lensEmpty') {
+    FILES = []; SYMBOLS = [];
+    initStats();
+    if (m.backend) $('#footBackend').textContent = m.backend;
+    if (m.dbPath) $('#footDb').textContent = m.dbPath.replace(/\\/g,'/');
+    showCorpusMessage(emptyStateHtml(m.reason, m.dbPath, m.backend));
+    renderFindSummary(); updateClsNote(); renderFindings();  // findings still render (samples)
+    markStore(m.reason==='missing'?'no store':'empty', true);
+  } else if (m.type === 'lensError') {
+    FILES = []; SYMBOLS = [];
+    initStats();
+    if (m.backend) $('#footBackend').textContent = m.backend;
+    showCorpusMessage('<div class="empty"><h3>Could not read the store</h3><p>'+esc(m.error||'unknown error')+'</p><p><code>'+esc(m.dbPath||'')+'</code></p></div>');
+    renderFindSummary(); updateClsNote(); renderFindings();
+    markStore('error', true);
+  }
+});
+
+/* first paint: findings + shell render immediately; corpus/symbols fill on lensData */
+renderFindSummary(); updateClsNote(); renderFindings();
+initStats();
+vscode.postMessage({ type: 'lensQuery' });
+
+/* ============================================================
+   Southern Cross starfield — ported from src/extension.ts.
+   Local 2D canvas, CSP-safe, purely decorative.
+   ============================================================ */
+try { (function(){
+  const c=$('#sky'), x=c.getContext('2d'); let W,H,stars=[],t=0;
+  const cross=[[.62,.30,2.6],[.72,.68,2.2],[.80,.44,1.8],[.55,.56,1.5],[.68,.50,1.1]]; // Crux
+  function size(){
+    W=c.width=c.offsetWidth*devicePixelRatio; H=c.height=c.offsetHeight*devicePixelRatio;
+    stars=[]; for(let i=0;i<90;i++) stars.push({x:Math.random()*W,y:Math.random()*H,
+      r:Math.random()*1.1*devicePixelRatio+.2,p:Math.random()*6.28,s:Math.random()*.5+.2});
+  }
+  function draw(){
+    t+=.016; x.clearRect(0,0,W,H);
+    for(const st of stars){ const a=.18+.30*(0.5+0.5*Math.sin(t*st.s+st.p));
+      x.beginPath(); x.arc(st.x,st.y,st.r,0,6.29); x.fillStyle='rgba(191,233,245,'+a+')'; x.fill(); }
+    const ox=W*0.62, oy=0, sc=Math.min(W,H)*0.42;
+    const px=cross.map(p=>[ox+ (p[0]-.62)*sc*1.6, oy + p[1]*sc ]);
+    x.strokeStyle='rgba(21,175,209,.22)'; x.lineWidth=1*devicePixelRatio;
+    x.beginPath(); x.moveTo(px[0][0],px[0][1]); x.lineTo(px[1][0],px[1][1]);
+    x.moveTo(px[2][0],px[2][1]); x.lineTo(px[3][0],px[3][1]); x.stroke();
+    for(let j=0;j<cross.length;j++){ const g=.5+.4*Math.sin(t*1.2+j); const r=cross[j][2]*devicePixelRatio;
+      const grd=x.createRadialGradient(px[j][0],px[j][1],0,px[j][0],px[j][1],r*4);
+      grd.addColorStop(0,'rgba(21,175,209,'+g+')'); grd.addColorStop(1,'rgba(21,175,209,0)');
+      x.fillStyle=grd; x.beginPath(); x.arc(px[j][0],px[j][1],r*4,0,6.29); x.fill();
+      x.fillStyle='rgba(230,250,255,'+g+')'; x.beginPath(); x.arc(px[j][0],px[j][1],r,0,6.29); x.fill(); }
+    requestAnimationFrame(draw);
+  }
+  size(); draw(); window.addEventListener('resize',size);
+})(); } catch(e){ /* decorative — must never break the viewer */ }
+</script>
+</body>
+</html>`;
+
+type LensFile = { path: string; lang: string; loc: number; fns: number; content: string };
+type LensSymbol = { name: string; path: string; line: number; kind: string };
+type LensBackend = 'sqlite' | 'mssql';
+type LensStore = { files: LensFile[]; symbols: LensSymbol[]; dbPath: string; backend: LensBackend };
+
+function sqliteLensStorePath(): string {
+  const cfg = getConfig();
+  return cfg.sqliteStorePath || process.env.KRIT_LOCAL_STORE || path.join(process.env.USERPROFILE || process.env.HOME || '', '.kritical-scx', 'scxcode-store.db');
+}
+
+function mssqlLensStoreLabel(): string {
+  const cfg = getConfig();
+  return `${cfg.mssqlServer}/${cfg.mssqlDatabase}`;
+}
+
+// .5231 — read the corpus store read-only via node:sqlite DatabaseSync (extension host is Node ≥ 22).
+// Lazy-require node:sqlite so a Node build without the flag can't break activation of the whole extension.
+// Columns mirror the local store schema: files(path,lang,loc,sha,fn_count,content,mined_utc),
+// symbols(path,name,kind,line). Returns null when the DB is missing so the webview shows an empty-state.
+function readSqliteLensStore(): LensStore | null {
+  const dbPath = sqliteLensStorePath();
+  if (!fs.existsSync(dbPath)) { return null; }
+  let DatabaseSync: any;
+  try { ({ DatabaseSync } = require('node:sqlite')); }
+  catch (e) { throw new Error('node:sqlite unavailable in this VS Code Node runtime: ' + (e as Error).message); }
+  const db = new DatabaseSync(dbPath, { readonly: true });
+  try {
+    const files: LensFile[] = db.prepare('SELECT path, lang, loc, fn_count, content FROM files ORDER BY path').all()
+      .map((r: any) => ({ path: r.path, lang: r.lang, loc: r.loc | 0, fns: r.fn_count | 0, content: r.content || '' }));
+    const symbols: LensSymbol[] = db.prepare('SELECT name, path, line, kind FROM symbols ORDER BY name').all()
+      .map((r: any) => ({ name: r.name, path: r.path, line: r.line | 0, kind: r.kind || 'function' }));
+    return { files, symbols, dbPath, backend: 'sqlite' };
+  } finally {
+    try { db.close(); } catch { /* best effort */ }
+  }
+}
+
+function readSqlcmdJson(server: string, database: string, query: string): any[] {
+  const out = execFileSync('sqlcmd', ['-S', server, '-d', database, '-E', '-W', '-h', '-1', '-y', '0', '-Y', '0', '-Q', `SET NOCOUNT ON; ${query}`], {
+    encoding: 'utf8',
+    timeout: 8000,
+    windowsHide: true,
+  }).trim();
+  const json = out.replace(/\r?\n/g, '').trim();
+  if (!json) { return []; }
+  return JSON.parse(json);
+}
+
+function decodeSqlHexText(hex: unknown): string {
+  if (typeof hex !== 'string' || !hex) { return ''; }
+  try { return Buffer.from(hex, 'hex').toString('utf8'); }
+  catch { return ''; }
+}
+
+function readMssqlLensStore(): LensStore | null {
+  const cfg = getConfig();
+  const label = mssqlLensStoreLabel();
+  const fileQuery = `
+IF OBJECT_ID('dbo.LensSource') IS NOT NULL
+BEGIN
+  SELECT TOP (500) path, ISNULL(NULLIF(ext,''),'txt') AS lang, line_count AS loc, CAST(0 AS int) AS fn_count, CONVERT(varchar(max), DECOMPRESS(content_gz), 2) AS content_hex FROM dbo.LensSource ORDER BY path FOR JSON PATH
+END
+ELSE IF OBJECT_ID('dbo.LensCorpusFile') IS NOT NULL
+BEGIN
+  SELECT TOP (500) path, ISNULL(NULLIF(lang,''),'txt') AS lang, loc, function_count AS fn_count, CAST('' AS nvarchar(max)) AS content FROM dbo.LensCorpusFile ORDER BY path FOR JSON PATH
+END
+ELSE
+BEGIN
+  SELECT CAST('' AS nvarchar(4000)) AS path, CAST('txt' AS nvarchar(32)) AS lang, CAST(0 AS int) AS loc, CAST(0 AS int) AS fn_count, CAST('' AS nvarchar(max)) AS content WHERE 1=0 FOR JSON PATH
+END`;
+  const symbolQuery = `
+IF OBJECT_ID('dbo.LensSymbol') IS NOT NULL
+BEGIN
+  SELECT TOP (2000) name, path, start_line AS line, kind FROM dbo.LensSymbol ORDER BY name FOR JSON PATH
+END
+ELSE
+BEGIN
+  SELECT CAST('' AS nvarchar(4000)) AS name, CAST('' AS nvarchar(4000)) AS path, CAST(0 AS int) AS line, CAST('symbol' AS nvarchar(64)) AS kind WHERE 1=0 FOR JSON PATH
+END`;
+  const files = readSqlcmdJson(cfg.mssqlServer, cfg.mssqlDatabase, fileQuery)
+    .map((r: any) => ({ path: r.path, lang: r.lang || 'txt', loc: r.loc | 0, fns: r.fn_count | 0, content: r.content || decodeSqlHexText(r.content_hex) }));
+  const symbols = readSqlcmdJson(cfg.mssqlServer, cfg.mssqlDatabase, symbolQuery)
+    .map((r: any) => ({ name: r.name, path: r.path, line: r.line | 0, kind: r.kind || 'symbol' }));
+  return { files, symbols, dbPath: label, backend: 'mssql' };
+}
+
+function readLensStore(): LensStore | null {
+  const cfg = getConfig();
+  if (cfg.storageBackend === 'sqlite') { return readSqliteLensStore(); }
+  if (cfg.storageBackend === 'mssql') { return readMssqlLensStore(); }
+  const sqlite = readSqliteLensStore();
+  if (sqlite && (sqlite.files.length || sqlite.symbols.length)) { return sqlite; }
+  try {
+    const mssql = readMssqlLensStore();
+    if (mssql && (mssql.files.length || mssql.symbols.length)) { return mssql; }
+  } catch { /* auto mode: SQL Server is optional */ }
+  return sqlite;
+}
+
+async function cmdLookingGlass(ctx: vscode.ExtensionContext) {
+  const panel = vscode.window.createWebviewPanel(
+    'krit-scxcode-looking-glass',
+    'Kritical Lens — Looking Glass',
+    vscode.ViewColumn.Beside,
+    { enableScripts: true, retainContextWhenHidden: true },
+  );
+  panel.webview.html = lookingGlassHtml();
+  panel.webview.onDidReceiveMessage((msg) => {
+    if (msg.type === 'lensQuery') {
+      try {
+        const store = readLensStore();
+        if (!store) {
+          const cfg = getConfig();
+          panel.webview.postMessage({ type: 'lensEmpty', reason: 'missing', dbPath: cfg.storageBackend === 'mssql' ? mssqlLensStoreLabel() : sqliteLensStorePath(), backend: cfg.storageBackend });
+          return;
+        }
+        if (!store.files.length && !store.symbols.length) {
+          panel.webview.postMessage({ type: 'lensEmpty', reason: 'empty', dbPath: store.dbPath, backend: store.backend });
+          return;
+        }
+        panel.webview.postMessage({ type: 'lensData', files: store.files, symbols: store.symbols, dbPath: store.dbPath, backend: store.backend });
+      } catch (e) {
+        const cfg = getConfig();
+        panel.webview.postMessage({ type: 'lensError', error: (e as Error).message, dbPath: cfg.storageBackend === 'mssql' ? mssqlLensStoreLabel() : sqliteLensStorePath(), backend: cfg.storageBackend });
+      }
+    }
+  });
+}
+
+function lookingGlassHtml(): string {
+  const nonce = Math.random().toString(36).slice(2, 10);
+  return LOOKING_GLASS_HTML.replace(/%%NONCE%%/g, nonce);
 }
 
 function chatHtml(): string {
@@ -941,7 +1992,7 @@ select option:checked { background: var(--vscode-list-activeSelectionBackground,
   <button class="adv-btn" id="advBtn" title="Advanced options">⚙</button>
 </div>
 <div class="adv" id="adv">
-  <label title="Sampling temperature (SCX accepts 0–2). The source marker shows whether this is the model's published recommendation (rec), a neutral default when none is published (def), the live API value (api), or your manual override (you).">Temp <input type="range" id="temp" min="0" max="2" step="0.05" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
+  <label title="Sampling temperature (SCX OpenAI-compatible safe range 0–1). The source marker shows whether this is the model's published recommendation (rec), a neutral default when none is published (def), the live API value (api), or your manual override (you).">Temp <input type="range" id="temp" min="0" max="1" step="0.05" value="0.7"><span id="tempVal">0.7</span> <span id="tempSrc" style="opacity:0.6;font-size:10px;"></span></label>
   <label>Provider <select id="provider"><option value="auto">Auto (SCX→Claude CLI)</option><option value="scx-native">SCX only</option><option value="claude-code-cli">Claude CLI only</option></select></label>
 </div>
 <div class="scx-status" id="scxStatus" title="Live SCX connection status">
@@ -1127,8 +2178,9 @@ window.addEventListener('message', (e) => {
     sessionOutTokens += (m.tokensOut || 0);
     const keyLabel = m.keyIndex > 1 ? ' · key' + m.keyIndex : '';
     const ctxLabel = m.autoContextChars > 0 ? ' · ctx ' + m.autoContextChars + 'c' : '';
+    const compactLabel = m.compactedTurns > 0 ? ' · flushed ' + m.compactedTurns + ' old turns' : '';
     const muxLabel = m.shards > 1 ? ' · 🔀 ' + m.shards + '-stream synthesis' : '';
-    add('assistant', m.text, m.model + keyLabel + muxLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
+    add('assistant', m.text, m.model + keyLabel + muxLabel + ' · ' + m.tokensIn + '⇢' + m.tokensOut + ' tok' + ctxLabel + compactLabel + ' · session ' + sessionInTokens + '⇢' + sessionOutTokens);
     if (m.model) modelEl.value = m.model;
     send.disabled = false;
   } else if (m.type === 'error') {
@@ -1208,7 +2260,9 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
         try {
           // Prepend auto-context from the active editor + any attached file/repo context.
           const ctx = buildAutoContext() + this._attached;
-          const messagesForApi: ScxMessage[] = [...this._history];
+          const cfg = getConfig();
+          const compacted = compactMessagesForSend(this._history, cfg.defaultModel, ctx.length);
+          const messagesForApi: ScxMessage[] = [...compacted.messages];
           if (ctx && messagesForApi.length > 0) {
             messagesForApi[messagesForApi.length - 1] = {
               role: 'user',
@@ -1216,9 +2270,11 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
             };
           }
           this._attached = ''; // consumed
-          const cfg = getConfig();
           const { res, modelUsed, keyIndex, shards } = await scxMux(messagesForApi, cfg.concurrency, cfg.maxTokens);
           const replyText = res.content.map((c) => c.text).join('');
+          if (compacted.compactedTurns > 0) {
+            this._history = [...compacted.messages];
+          }
           this._history.push({ role: 'assistant', content: replyText });
           view.webview.postMessage({
             type: 'reply',
@@ -1229,6 +2285,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
             tokensIn: res.usage.input_tokens,
             tokensOut: res.usage.output_tokens,
             autoContextChars: ctx.length,
+            compactedTurns: compacted.compactedTurns,
           });
         } catch (e) {
           // .5231 (bughunt-confirmed) — pop the orphaned user turn so a failed send doesn't leave two
@@ -1254,6 +2311,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           // stable key list by _keyRotation, so we must NOT mutate process.env.SCX_API_KEY (that re-dedup
           // dropped the promoted key and shrank the set). Pointer advance = next key becomes primary.
           _keyRotation = (_keyRotation + 1) % cfg.apiKeys.length;
+          saveKeyRotation(_keyRotation);   // .5231b (re-hunt) — persist so the selection survives restart
           view.webview.postMessage({ type: 'keySwitched', newKeyIndex: _keyRotation + 1 });
         } catch (e) {
           view.webview.postMessage({ type: 'error', error: 'Key switch failed: ' + (e as Error).message });
@@ -1270,6 +2328,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           canSelectMany: !folder, canSelectFiles: !folder, canSelectFolders: folder,
           openLabel: folder ? 'Attach this folder to SCXCode' : 'Attach file(s) to SCXCode',
           title: folder ? 'Select a folder (read recursively)' : 'Select one or more files',
+          defaultUri: getAttachmentDialogDefaultUri(),
         });
         if (picked && picked.length) {
           const { block, fileCount, chars } = await collectAttachments(picked);
@@ -1424,7 +2483,18 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
         model_reasoning_summary: codex.model_reasoning_summary || 'auto', model_verbosity: codex.model_verbosity || 'medium',
       },
       mcp: Object.keys(mcp).map((name) => ({ name, command: mcp[name].command || '', args: Array.isArray(mcp[name].args) ? mcp[name].args.join(' ') : '', env: mcp[name].env ? JSON.stringify(mcp[name].env) : '' })),
-      scxcode: { baseUrl: cfg.baseUrl, defaultModel: cfg.defaultModel, apiKeySet: !!cfg.apiKey, keyCount: cfg.apiKeys.length, temperature: cfg.temperature },
+      scxcode: {
+        baseUrl: cfg.baseUrl, defaultModel: cfg.defaultModel, apiKeySet: !!cfg.apiKey, keyCount: cfg.apiKeys.length, temperature: cfg.temperature,
+        storageBackend: cfg.storageBackend, sqliteStorePath: cfg.sqliteStorePath, sqliteResolvedPath: sqliteLensStorePath(),
+        mssqlServer: cfg.mssqlServer, mssqlDatabase: cfg.mssqlDatabase,
+        autoContext: cfg.autoContext, autoContextMaxChars: cfg.autoContextMaxChars, concurrency: cfg.concurrency, maxTokens: cfg.maxTokens,
+        modelCatalogPath: cfg.modelCatalogPath, modelCatalogResolvedPath: configuredModelCatalogPath(),
+      },
+      modelCatalog: {
+        path: configuredModelCatalogPath(),
+        candidates: modelCatalogCandidates(),
+        count: readFullModelRows().length,
+      },
       codexConfigPath: codexConfigPath(),
     };
   }
@@ -1455,6 +2525,15 @@ function cmdSetupGui(context: vscode.ExtensionContext, tab?: string) {
         const c = vscode.workspace.getConfiguration('kritical.scxcode');
         await c.update('baseUrl', m.baseUrl, vscode.ConfigurationTarget.Global);
         await c.update('defaultModel', m.defaultModel, vscode.ConfigurationTarget.Global);
+        await c.update('storageBackend', m.storageBackend || 'auto', vscode.ConfigurationTarget.Global);
+        await c.update('sqliteStorePath', m.sqliteStorePath || '', vscode.ConfigurationTarget.Global);
+        await c.update('mssqlServer', m.mssqlServer || '.\\SQLEXPRESS', vscode.ConfigurationTarget.Global);
+        await c.update('mssqlDatabase', m.mssqlDatabase || 'KriticalSCXCodeStore', vscode.ConfigurationTarget.Global);
+        await c.update('modelCatalogPath', m.modelCatalogPath || _installModelCatalogPath, vscode.ConfigurationTarget.Global);
+        await c.update('autoContext', m.autoContext || 'file+selection', vscode.ConfigurationTarget.Global);
+        await c.update('autoContextMaxChars', Number(m.autoContextMaxChars) || 8000, vscode.ConfigurationTarget.Global);
+        await c.update('concurrency', Number(m.concurrency) || 1, vscode.ConfigurationTarget.Global);
+        await c.update('maxTokens', Number(m.maxTokens) || 1500, vscode.ConfigurationTarget.Global);
         post({ type: 'saved', section: 'scxcode', ok: true });
       } catch (e: any) { post({ type: 'saved', section: 'scxcode', ok: false, error: e.message }); }
     } else if (m.type === 'launchCodex') { vscode.commands.executeCommand('kritical.scxcode.scxCodex'); }
@@ -1557,6 +2636,26 @@ function setupGuiHtml(logoUri: string): string {
       <label>SCX API base URL</label><input id="sx-base" placeholder="https://api.scx.ai">
       <label>Default model</label><select id="sx-model"></select>
       <div class="note" id="sx-model-note"></div>
+      <label>Model catalog JSON</label><input id="sx-catalog-path" placeholder="C:\\KriticalSCX\\config\\models\\scx-model-catalog.json">
+      <div class="note" id="sx-catalog-note"></div>
+      <label>Auto-context</label><select id="sx-auto-context">
+        <option value="off">Off</option>
+        <option value="file">Active file</option>
+        <option value="file+selection">Active file + selection</option>
+        <option value="workspace-tree">Workspace tree</option>
+      </select>
+      <label>Auto-context max chars</label><input id="sx-auto-context-max" type="number" min="1000" step="1000" placeholder="8000">
+      <label>Mux streams</label><input id="sx-concurrency" type="number" min="1" max="8" step="1" placeholder="1">
+      <label>Max output tokens</label><input id="sx-max-tokens" type="number" min="20" step="100" placeholder="1500">
+      <label>Backing store</label><select id="sx-storage">
+        <option value="auto">Auto — SQLite first, SQL Server fallback</option>
+        <option value="sqlite">SQLite local store</option>
+        <option value="mssql">SQL Server Express big store</option>
+      </select>
+      <div class="note" id="sx-storage-note"></div>
+      <label>SQLite store path</label><input id="sx-sqlite-path" placeholder="~/.kritical-scx/scxcode-store.db">
+      <label>SQL Server instance</label><input id="sx-mssql-server" placeholder=".\\SQLEXPRESS">
+      <label>SQL Server database</label><input id="sx-mssql-db" placeholder="KriticalSCXCodeStore">
       <label>API key</label><input id="sx-key" disabled>
       <div><button class="save" id="save-scxcode">Save SCXCode settings</button><span id="msg-scxcode"></span></div>
     </div></div>
@@ -1629,7 +2728,7 @@ function setupGuiHtml(logoUri: string): string {
     var servers=[]; q('mcp-rows').querySelectorAll('.mcp-card').forEach(function(r){ servers.push({name:r.querySelector('.m-name').value.trim(),command:r.querySelector('.m-cmd').value.trim(),args:r.querySelector('.m-args').value.trim(),env:r.querySelector('.m-env').value.trim()}); });
     vscode.postMessage({type:'saveMcp',servers:servers});
   };
-  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value}); };
+  q('save-scxcode').onclick=function(){ vscode.postMessage({type:'saveScxcode',baseUrl:q('sx-base').value,defaultModel:q('sx-model').value,modelCatalogPath:q('sx-catalog-path').value.trim(),autoContext:q('sx-auto-context').value,autoContextMaxChars:q('sx-auto-context-max').value,concurrency:q('sx-concurrency').value,maxTokens:q('sx-max-tokens').value,storageBackend:q('sx-storage').value,sqliteStorePath:q('sx-sqlite-path').value.trim(),mssqlServer:q('sx-mssql-server').value.trim(),mssqlDatabase:q('sx-mssql-db').value.trim()}); };
   q('launch').onclick=function(){ vscode.postMessage({type:'launchCodex'}); };
   window.addEventListener('message',function(e){ var m=e.data;
     if(m.type==='data'){
@@ -1644,6 +2743,19 @@ function setupGuiHtml(logoUri: string): string {
       q('sx-base').value=m.scxcode.baseUrl; q('sx-key').value=m.scxcode.apiKeySet?('set · '+m.scxcode.keyCount+' key(s) in HKCU'):'NOT SET — set SCX_API_KEY';
       fillModelSelect(q('sx-model'),false);
       selectValid(q('sx-model'), m.scxcode.defaultModel, q('sx-model-note'), 'scx');
+      q('sx-catalog-path').value=m.scxcode.modelCatalogPath||'';
+      q('sx-catalog-path').placeholder=m.scxcode.modelCatalogResolvedPath||'C:\\\\KriticalSCX\\\\config\\\\models\\\\scx-model-catalog.json';
+      q('sx-catalog-note').innerHTML='Full catalog rows: <b>'+((m.modelCatalog&&m.modelCatalog.count)||0)+'</b>. Canonical: <code>'+((m.modelCatalog&&m.modelCatalog.path)||m.scxcode.modelCatalogResolvedPath||'')+'</code>.';
+      q('sx-auto-context').value=m.scxcode.autoContext||'file+selection';
+      q('sx-auto-context-max').value=m.scxcode.autoContextMaxChars||8000;
+      q('sx-concurrency').value=m.scxcode.concurrency||1;
+      q('sx-max-tokens').value=m.scxcode.maxTokens||1500;
+      q('sx-storage').value=m.scxcode.storageBackend||'auto';
+      q('sx-sqlite-path').value=m.scxcode.sqliteStorePath||'';
+      q('sx-sqlite-path').placeholder=m.scxcode.sqliteResolvedPath||'~/.kritical-scx/scxcode-store.db';
+      q('sx-mssql-server').value=m.scxcode.mssqlServer||'.\\\\SQLEXPRESS';
+      q('sx-mssql-db').value=m.scxcode.mssqlDatabase||'KriticalSCXCodeStore';
+      q('sx-storage-note').innerHTML='Looking Glass uses <b>'+q('sx-storage').value+'</b>. SQLite path resolves to <code>'+(m.scxcode.sqliteResolvedPath||'~/.kritical-scx/scxcode-store.db')+'</code>; SQL Server target is <code>'+(q('sx-mssql-server').value+'/'+q('sx-mssql-db').value)+'</code>.';
       if(m.tab){ var tb=document.querySelector('.tab[data-t="'+m.tab+'"]'); if(tb) tb.click(); }
     } else if(m.type==='saved'){
       var el=q('msg-'+m.section); if(el){ if(m.ok===false){ el.className='err'; el.textContent='✗ '+(m.error||'failed'); } else { el.className='ok'; el.textContent='✓ saved'+(m.backup?(' · backup '+m.backup.split(/[\\\\/]/).pop()):''); } setTimeout(function(){el.textContent='';},6000); }
@@ -1669,6 +2781,7 @@ export function activate(context: vscode.ExtensionContext) {
     ['kritical.scxcode.explainFile', cmdExplainFile],
     ['kritical.scxcode.generateTests', cmdGenerateTests],
     ['kritical.scxcode.muxQuery', cmdMuxQuery],
+    ['kritical.scxcode.lookingGlass', () => cmdLookingGlass(context)],   // .5231 — Lens Looking Glass panel
     ['kritical.scxcode.scxCodex', () => cmdScxCodex(context)],
     ['kritical.scxcode.checkUpdate', () => cmdCheckUpdate(context)],
     ['kritical.scxcode.setupGui', () => cmdSetupGui(context)],

@@ -181,6 +181,32 @@
 
 12+ SCX models — MiniMax-M2.7 (default) · MAGPiE · gpt-oss-120b · DeepSeek-V3.1 · coder · gemma-4 · Qwen3 · Llama-4-Maverick · Meta-Llama-3.3-70B · E5-Mistral embeddings · Whisper · opir moderation. Fallback chain hard-wired: MiniMax-M2.7 → MAGPiE → gpt-oss-120b. Multi-key rotation via `SCX_API_KEY_2..9` in HKCU.
 
+## Known Working Restore Point - 2026-07-09
+
+`Kritical.SCXCodex.exe` was captured as a known-working installed runtime while PID `8548` was running from:
+
+```text
+C:\KriticalSCX\dist\Kritical.SCXCodex\bin\Kritical.SCXCodex.exe
+```
+
+Restore docs and hash evidence:
+
+```text
+docs\restore-points\2026-07-09-scxcodex-working\RESTORE-POINT.md
+```
+
+Binary backup is local-only and deliberately not committed to Git:
+
+```text
+C:\KriticalSCX\restore-points\2026-07-09-scxcodex-working\Kritical.SCXCodex.exe
+```
+
+Any rollback must verify SHA256 first:
+
+```text
+C934C0E5E391EC348BC08E75039A3E3303D5605D46C7D51BDF83B88868CB4A1E
+```
+
 ## Kritical brand invariants (per HR13 + brand spec)
 
 - Primary colour: **`#13365C`** (Kritical navy)

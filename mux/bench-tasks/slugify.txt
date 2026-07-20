@@ -1,0 +1,1 @@
+Write a single JavaScript function `slugify(s)` that lowercases the input, replaces every run of non-alphanumeric characters with a single hyphen, and trims leading/trailing hyphens. Return ONLY the function.

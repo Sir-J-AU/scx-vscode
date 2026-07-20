@@ -16,7 +16,27 @@ BASELINES = [
     ("dawn15",  "theme-layers/dawn-upstream"),
     ("overlay", "theme-layers/overlay"),
 ]
-THEME_EXT = (".liquid", ".json", ".css", ".js", ".scss", ".svg", ".txt")
+# .5187 — extended to cover binary theme assets (images/fonts) + config that the
+# original .5230 list silently dropped. SHA256+size compare works identically on
+# binary bytes (the file is already read "rb"), and image/font assets ARE part of
+# the theme surface — a Dawn upgrade can add/remove/change them, and the overlay's
+# custom images (Horizontal_Logo.png etc.) are load-bearing Kritical IP. Missing
+# them meant 6 real live overlay files (5 images + .theme-check.yml) were absent
+# from the baseline diff entirely.
+THEME_EXT = (
+    ".liquid", ".json", ".css", ".js", ".scss", ".svg", ".txt",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".avif",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".yml", ".yaml", ".map",
+)
+# .5187 — the composer (Build-PaxThemeFromLayers.ps1) skips .bak.NNN / .deprecated.NNN
+# sentinel files; they are HR23-preserved historical snapshots, NOT live theme surface.
+# The original miner counted them, inflating the overlay surface from the real 653 to
+# 778 and mis-classifying dead sentinels (assets/base.bak.1022.css,
+# _attic/.../ai_gen_block_*.deprecated.988.liquid) as live "OVERLAY-ONLY net-new IP".
+# Their full history already lives in the raw dbo.LensGitBlob ingest, so excluding them
+# here (the LIVE-baseline-diff table) is the correct separation.
+SKIP_MARKERS = (".bak.", ".deprecated.")
 
 def scan(root):
     """relpath -> (sha256, size) for theme files under root."""
@@ -26,7 +46,10 @@ def scan(root):
         return out
     for dirpath, _dirs, files in os.walk(base):
         for f in files:
-            if not f.lower().endswith(THEME_EXT):
+            lf = f.lower()
+            if not lf.endswith(THEME_EXT):
+                continue
+            if any(m in lf for m in SKIP_MARKERS):
                 continue
             full = os.path.join(dirpath, f)
             rel = os.path.relpath(full, base).replace("\\", "/")

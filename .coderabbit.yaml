@@ -1,0 +1,143 @@
+# Kritical canonical CodeRabbit configuration — maximal visibility + review depth.
+# Applied repo-wide by Sync-KriticalCodeRabbitConfig.ps1. Do not hand-edit repo copies
+# for anything except the path_instructions block (repo-specific language rules) —
+# everything else should stay identical across every repo so the review posture is
+# uniform. Re-run the sync script to propagate template changes.
+language: en-US
+tone_instructions: ""
+early_access: true
+enable_free_tier: true
+
+reviews:
+  profile: assertive              # deepest scrutiny — ask every question
+  request_changes_workflow: false # keep merge gate human-controlled
+  high_level_summary: true
+  high_level_summary_in_walkthrough: false
+  review_status: true
+  review_details: true            # post ignored files / context / suppressed comments too
+  review_progress: true
+  commit_status: true
+  fail_commit_status: false
+  collapse_walkthrough: false     # walkthrough shown expanded, not hidden behind a toggle
+  changed_files_summary: true
+  sequence_diagrams: true         # the Mermaid graph/tree view of the change
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: true
+  suggested_reviewers: true
+  auto_assign_reviewers: true
+  in_progress_fortune: true
+  poem: true
+  enable_prompt_for_ai_agents: true
+  abort_on_close: true
+  disable_cache: false
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0   # never auto-pause — keep re-reviewing every push
+    drafts: false
+    ignore_title_keywords: []
+    labels: []
+    base_branches: []
+    ignore_usernames: []
+
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: true
+    autofix:
+      enabled: true
+
+  pre_merge_checks:
+    docstrings:
+      mode: warning
+    title:
+      mode: warning
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+
+  tools:
+    ast-grep:
+      essential_rules: true
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    markdownlint:
+      enabled: true
+    biome:
+      enabled: true
+    eslint:
+      enabled: true
+    yamllint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+    actionlint:
+      enabled: true
+    regal:
+      enabled: true
+    sqlfluff:
+      enabled: true
+    hadolint:
+      enabled: true
+    checkov:
+      enabled: true
+    languagetool:
+      enabled: true
+
+chat:
+  art: true
+  allow_non_org_members: true
+  auto_reply: true
+  integrations:
+    jira:
+      usage: auto
+    linear:
+      usage: auto
+
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/CLAUDE.md"
+      - "**/*.md"
+  learnings:
+    scope: auto
+    approval_delay: 0
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto
+  mcp:
+    usage: auto
+  automatic_repository_linking: true
+
+code_generation:
+  docstrings:
+    language: en-US
+  unit_tests: {}
+
+issue_enrichment:
+  auto_enrich:
+    enabled: true
+  planning:
+    enabled: true
+    auto_planning:
+      enabled: true
+  labeling:
+    auto_apply_labels: true

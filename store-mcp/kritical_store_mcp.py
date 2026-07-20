@@ -3,17 +3,22 @@ Kritical Store MCP — exposes KriticalSCXCodeStore (the mined SCX brain) as MCP
 (Codex, Claude, Cline, etc.) can query it directly. Read-only by default. Uses pyodbc + FastMCP.
 Run: python kritical_store_mcp.py   (stdio JSON-RPC MCP server)
 """
+import os
 import pyodbc
 from mcp.server.fastmcp import FastMCP
 
-CONN = ("DRIVER={ODBC Driver 18 for SQL Server};SERVER=.\\SQLEXPRESS;"
-        "DATABASE=KriticalSCXCodeStore;Trusted_Connection=yes;Encrypt=no;")
+CONN = os.environ.get(
+    "KRIT_SCX_STORE_MSSQL",
+    "DRIVER={ODBC Driver 18 for SQL Server};SERVER=.\\SQLEXPRESS;"
+    "DATABASE=KriticalSCXCodeStore;Trusted_Connection=yes;Encrypt=no;",
+)
+CONNECT_TIMEOUT = max(1, min(int(os.environ.get("KRIT_SCX_STORE_CONNECT_TIMEOUT", "5")), 30))
 
 mcp = FastMCP("kritical-store")
 
 
 def _rows(sql, params=()):
-    cn = pyodbc.connect(CONN, timeout=15, readonly=True)
+    cn = pyodbc.connect(CONN, timeout=CONNECT_TIMEOUT, readonly=True)
     try:
         cur = cn.cursor()
         cur.execute(sql, params)
@@ -27,10 +32,13 @@ def _rows(sql, params=()):
 @mcp.tool()
 def store_stats() -> str:
     """Row counts for every table in KriticalSCXCodeStore."""
-    r = _rows("SELECT t.name AS [table], SUM(p.rows) AS [rows] FROM sys.tables t "
-              "JOIN sys.partitions p ON p.object_id=t.object_id AND p.index_id IN (0,1) "
-              "GROUP BY t.name ORDER BY t.name")
-    return "\n".join(f"{x['table']}: {x['rows']}" for x in r)
+    try:
+        r = _rows("SELECT t.name AS [table], SUM(p.rows) AS [rows] FROM sys.tables t "
+                  "JOIN sys.partitions p ON p.object_id=t.object_id AND p.index_id IN (0,1) "
+                  "GROUP BY t.name ORDER BY t.name")
+        return "\n".join(f"{x['table']}: {x['rows']}" for x in r)
+    except Exception as e:
+        return f"store_stats unavailable: {e}"
 
 
 def _lim(v, cap, dflt=10):

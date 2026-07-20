@@ -4,7 +4,7 @@ Runs PSScriptAnalyzer (PS), semgrep (multi-lang), npm audit (deps), deterministi
 greps, and a concurrent DeepSeek security review — all into dbo.LensSecurityFinding (inference-tagged).
 Usage: python Invoke-KritScxSecurityMine.py <repoRoot>
 """
-import sys, os, re, json, subprocess, hashlib, time, urllib.request
+import sys, os, re, json, subprocess, hashlib, time, urllib.request, atexit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pyodbc
 
@@ -15,6 +15,17 @@ SKIP = ("node_modules", os.sep+"out"+os.sep, os.sep+"emitted"+os.sep, "package-l
 CODE = (".ps1", ".psm1", ".py", ".ts", ".js")
 
 cn = pyodbc.connect(CONN, timeout=30); cur = cn.cursor()
+# .5231b (re-hunt) — this mine runs external tools (PSScriptAnalyzer/semgrep/npm audit) and a
+# concurrent DeepSeek lens; an exception OUTSIDE the individual tool try/excepts (e.g. a cur.execute
+# in add(), the deepseek-stage commit, or a summary query) used to skip the lone cn.close() at the
+# bottom, leaking the pyodbc handle + locking KriticalSCXCodeStore until the process died. Register the
+# close via atexit so the connection is ALWAYS released on any exit path (HR16 idempotency + HR29
+# fail-open). The explicit cn.close() at the end still runs on the happy path; atexit is a no-op after
+# an already-closed connection.
+def _close_cn():
+    try: cn.close()
+    except Exception: pass  # already closed on the happy path (double-close is a no-op)
+atexit.register(_close_cn)
 cur.execute("IF OBJECT_ID('dbo.LensSecurityFinding') IS NOT NULL TRUNCATE TABLE dbo.LensSecurityFinding")
 cn.commit()
 def add(path, tool, sev, rule, line, msg, tag):

@@ -24,6 +24,29 @@ $models  = Join-Path $scx 'models\Get-KritScxModels.ps1'
 $vpy     = Join-Path $Venv 'Scripts\python.exe'
 function Ok($b){ if($b){'✅'}else{'❌'} }
 
+# .5231b (re-hunt) — HR18: never Remove-Item -Recurse -Force a path without interrogating NTFS reparse
+# points first. A junction/symlink inside the VS Code extensions folder that points back at a parent (or
+# anywhere else) would make -Recurse follow the link and either loop or delete the WRONG target's
+# contents. This helper deletes reparse points as the link itself (no -Recurse traversal) and only
+# recurses into genuine directories.
+function Remove-ItemReparseSafe {
+  param([Parameter(ValueFromPipeline=$true)]$InputObject)
+  process {
+    foreach ($it in @($InputObject)) {
+      if (-not $it) { continue }
+      $item = if ($it -is [System.IO.FileSystemInfo]) { $it } else { Get-Item -LiteralPath "$it" -Force -ea 0 }
+      if (-not $item) { continue }
+      if ($item.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)) {
+        # Delete the link node only — do NOT traverse into whatever it points at.
+        try { [System.IO.Directory]::Delete($item.FullName, $false) }
+        catch { Remove-Item -LiteralPath $item.FullName -Force -ea 0 }
+      } else {
+        Remove-Item -LiteralPath $item.FullName -Recurse -Force -ea 0
+      }
+    }
+  }
+}
+
 function Show-Status {
   Write-Host "`n=== Kritical SCX — Stack Status ===" -ForegroundColor Cyan
   Write-Host "  $(Ok (Get-Command node -ea 0))  node   $(try{node -v}catch{})"
@@ -66,7 +89,7 @@ switch ($Mode) {
   'Uninstall' {
     & $pack -Mode Remove | Out-Null
     & $proxyMgr -Mode Remove | Out-Null
-    Get-ChildItem "$env:USERPROFILE\.vscode-insiders\extensions" -Directory -ea 0 | Where-Object Name -like 'kritical.plugin-control-panel*' | Remove-Item -Recurse -Force -ea 0
+    Get-ChildItem "$env:USERPROFILE\.vscode-insiders\extensions" -Directory -ea 0 | Where-Object Name -like 'kritical.plugin-control-panel*' | Remove-ItemReparseSafe   # .5231b (re-hunt) — HR18 reparse-point guard before recursive delete
     Write-Host "Uninstalled Kritical layers. Stock Claude + Codex untouched." -ForegroundColor Green
     Write-Host "If anything feels off: pwsh C:\KriticalSCX\safety\Restore-WorkingClaude.ps1" -ForegroundColor Yellow
   }

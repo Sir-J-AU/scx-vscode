@@ -57,17 +57,22 @@ for dp, dn, fn in os.walk(ROOT):
 files.sort()
 print(f"[CORPUS] mining {len(files)} code files under {os.path.basename(ROOT)}")
 
+# .5231b (re-hunt) — the SQL connection was opened here with no try/finally: any exception in the
+# mining loop below (symbol extraction, call-graph inserts, a transient SQL error) left the pyodbc
+# connection open, holding a handle/lock on KriticalSCXCodeStore until the process died. Wrap the
+# whole mining body so cn is ALWAYS closed (HR16 idempotency + HR29 fail-open).
 cn = pyodbc.connect(CONN, timeout=30); cur = cn.cursor()
-for d in DDL: cur.execute(d)
-cn.commit()
-# reset the corpus tables (fresh mine each run)
-for t in ("LensCorpusFile", "LensSymbol", "LensCallGraph"):
+try:
+  for d in DDL: cur.execute(d)
+  cn.commit()
+  # reset the corpus tables (fresh mine each run)
+  for t in ("LensCorpusFile", "LensSymbol", "LensCallGraph"):
     cur.execute(f"TRUNCATE TABLE dbo.{t}")
-cn.commit()
+  cn.commit()
 
-all_symbols = {}   # name -> path (last def wins; good enough for edge resolution)
-per_file = []      # (rel, lang, loc, sha, funcs[], imports[])
-for p in files:
+  all_symbols = {}   # name -> path (last def wins; good enough for edge resolution)
+  per_file = []      # (rel, lang, loc, sha, funcs[], imports[])
+  for p in files:
     try: src = open(p, encoding="utf-8-sig", errors="replace").read()
     except Exception: continue
     rel = os.path.relpath(p, ROOT).replace("\\", "/")
@@ -84,35 +89,59 @@ for p in files:
     for name, ln in funcs:
         all_symbols[name] = rel
 
-# write files + symbols
-for rel, lang, loc, sha, funcs, imps in per_file:
+  # write files + symbols
+  for rel, lang, loc, sha, funcs, imps in per_file:
     cur.execute("INSERT dbo.LensCorpusFile(path,lang,loc,sha256,function_count,imports) VALUES(?,?,?,?,?,?)",
                 rel, lang, loc, sha, len(funcs), json.dumps(imps))
     for name, ln in funcs:
         cur.execute("INSERT dbo.LensSymbol(path,name,kind,start_line) VALUES(?,?,?,?)", rel, name, "function", ln)
-cn.commit()
+  cn.commit()
 
-# call graph: for each file, which OTHER known symbols does it reference?
-edges = 0
-for p, (rel, lang, loc, sha, funcs, imps) in zip(files, per_file):
+  # .5231 (bughunt) — strip comments and string/char literals so edge resolution can't match a symbol
+  # name that only appears inside a comment or a quoted string (a major false-positive source). This is
+  # a pragmatic lexical scrub (not a full parser): blank out line comments, block comments, and quoted
+  # spans, preserving newlines/length so later heuristics stay stable. Covers the corpus's languages
+  # (# for ps1/py, // and /* */ for ts/js/mjs/cjs, plus ' " ` string/char quotes).
+  _STRIP = re.compile(
+      r"""(?P<block>/\*.*?\*/)          # C-style block comment
+        | (?P<line>(?://|\#)[^\n]*)     # // or # line comment
+        | (?P<dq>"(?:\\.|[^"\\\n])*")   # double-quoted string
+        | (?P<sq>'(?:\\.|[^'\\\n])*')   # single-quoted string / char
+        | (?P<bt>`(?:\\.|[^`\\])*`)     # backtick template literal
+      """,
+      re.S | re.X,
+  )
+  def _strip_noncode(text):
+      # Replace each comment/string span with same-length whitespace (newlines kept) so word boundaries
+      # and offsets are preserved but the contents can no longer produce spurious symbol matches.
+      return _STRIP.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+  # call graph: for each file, which OTHER known symbols does it reference?
+  edges = 0
+  for p, (rel, lang, loc, sha, funcs, imps) in zip(files, per_file):
     try: src = open(p, encoding="utf-8-sig", errors="replace").read()
     except Exception: continue
+    code = _strip_noncode(src)   # .5231 — match only against code, not comments/strings
     own = set(n for n, _ in funcs)
     called = set()
     for name, tgt in all_symbols.items():
         if name in own or tgt == rel: continue
-        if re.search(r"\b" + re.escape(name) + r"\b\s*\(", src) or re.search(r"\b" + re.escape(name) + r"\b", src) and len(name) > 4:
+        # .5231 (bughunt) — require a CALL-LIKE context (`name(`), optionally qualified (`.name(`),
+        # instead of the old "bare word anywhere" fallback whose loose `or ... and len>4` precedence
+        # let any 5+ char name match anywhere. Calls are the edges we actually want in a call graph.
+        if re.search(r"(?<![\w.])" + re.escape(name) + r"\s*\(", code):
             called.add((name, tgt))
     for name, tgt in called:
         cur.execute("INSERT dbo.LensCallGraph(from_path,symbol,edge,target_path) VALUES(?,?,?,?)", rel, name, "call", tgt); edges += 1
-cn.commit()
+  cn.commit()
 
-# summary
-cur.execute("SELECT COUNT(*), SUM(loc), SUM(function_count) FROM dbo.LensCorpusFile"); nf, nloc, nfn = cur.fetchone()
-cur.execute("SELECT COUNT(*) FROM dbo.LensCallGraph"); ne = cur.fetchone()[0]
-cur.execute("SELECT TOP 8 target_path, COUNT(*) c FROM dbo.LensCallGraph GROUP BY target_path ORDER BY c DESC")
-hubs = cur.fetchall()
-cn.close()
+  # summary
+  cur.execute("SELECT COUNT(*), SUM(loc), SUM(function_count) FROM dbo.LensCorpusFile"); nf, nloc, nfn = cur.fetchone()
+  cur.execute("SELECT COUNT(*) FROM dbo.LensCallGraph"); ne = cur.fetchone()[0]
+  cur.execute("SELECT TOP 8 target_path, COUNT(*) c FROM dbo.LensCallGraph GROUP BY target_path ORDER BY c DESC")
+  hubs = cur.fetchall()
+finally:
+  cn.close()   # .5231b (re-hunt) — always release the SQL handle, even on a mid-mine exception
 print(f"[CORPUS] mined: {nf} files · {nloc} LOC · {nfn} functions · {ne} call-graph edges")
 print(f"[CORPUS] most-depended-on files (call-graph hubs):")
 for h, c in hubs: print(f"    {h}: {c} inbound refs")

@@ -56,7 +56,19 @@ switch ($Mode) {
     # Start from the config dir with PYTHONPATH set so the HR27 write-through callback
     # (kritical_scx_logger) imports and loads. Wrapped via cmd so PYTHONPATH is set per-run.
     $ldir = Split-Path $config
-    $cmdArgs = "/c set `"PYTHONPATH=$ldir`" && `"$litellm`" --config `"$config`" --host $BindHost --port $Port"
+    # HR29 additive: make THEGRID_API_KEY available to the proxy PROCESS only.
+    # Resolved from $env:THEGRID_API_KEY, else the JoshONLY secrets store, and
+    # embedded into the task launch cmd. It is NOT written to the operator's
+    # global (HKCU) environment, so a plain `claude`/shell session inherits
+    # nothing — turning the proxy off returns every agent to direct API.
+    $gridKey = $env:THEGRID_API_KEY
+    if (-not $gridKey) {
+      $gridFile = Get-ChildItem 'C:\Users\joshl\OneDrive - Kritical Pty Ltd\Github-SecretsOutsideOfGitRepos-JoshONLY' -Filter 'thegrid-apiKey*.txt' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+      if ($gridFile) { $gridKey = (Get-Content $gridFile.FullName -Raw).Trim() }
+    }
+    $setGrid = if ($gridKey) { "set `"THEGRID_API_KEY=$gridKey`" && " } else { '' }
+    Write-Host "  thegrid key    : $(if($gridKey){'resolved (embedded in task env only)'}else{'NOT found — thegrid-code-standard will be unroutable'})" -ForegroundColor $(if($gridKey){'Green'}else{'Yellow'})
+    $cmdArgs = "/c set `"PYTHONPATH=$ldir`" && ${setGrid}`"$litellm`" --config `"$config`" --host $BindHost --port $Port"
     $action  = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $cmdArgs -WorkingDirectory $ldir
     $settings= New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
     # NO trigger => manual / on-demand only (safety).
