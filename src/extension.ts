@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { spawn, execFileSync } from 'child_process';
 import * as tomlLib from '@iarna/toml';
+import { compactMessagesForSend } from './chatCompaction';
 
 interface ScxMessage { role: 'user' | 'assistant' | 'system'; content: string; }
 interface ScxCompletionRequest { model: string; messages: ScxMessage[]; max_tokens?: number; system?: string; temperature?: number; }
@@ -308,53 +309,10 @@ function modelContextTokens(id: string): number {
   return known[String(id || '').toLowerCase()] || 108000;
 }
 
-function estimateTokens(text: string): number {
-  return Math.ceil(String(text || '').length / 4);
-}
-
-function summarizeForCompaction(messages: ScxMessage[]): string {
-  return messages.map((m, i) => {
-    const compact = m.content.replace(/\s+/g, ' ').trim().slice(0, 700);
-    return `${i + 1}. ${m.role}: ${compact}${m.content.length > 700 ? ' ...' : ''}`;
-  }).join('\n');
-}
-
-function compactMessagesForSend(history: ScxMessage[], model: string, extraChars = 0):
-    { messages: ScxMessage[]; compactedTurns: number } {
-  const cfg = getConfig();
-  if (cfg.autocompact === 'off' || history.length < 9) {
-    return { messages: [...history], compactedTurns: 0 };
-  }
-  const contextTokens = modelContextTokens(model);
-  const threshold = cfg.autocompact === 'aggressive' ? 0.50 : 0.72;
-  const reserve = Math.max(cfg.maxTokens + 1500, 3500);
-  const budget = Math.max(4000, Math.floor(contextTokens * threshold) - reserve);
-  const estimated = history.reduce((sum, m) => sum + estimateTokens(m.content), 0) + estimateTokens('x'.repeat(extraChars));
-  if (estimated <= budget) {
-    return { messages: [...history], compactedTurns: 0 };
-  }
-
-  const keep = cfg.autocompact === 'aggressive' ? 5 : 7; // odd count keeps user/assistant alternation after summary pair
-  const recent = history.slice(-keep);
-  const old = history.slice(0, Math.max(0, history.length - keep));
-  if (!old.length) {
-    return { messages: [...history], compactedTurns: 0 };
-  }
-  const summary = [
-    '## Kritical SCXCode Auto-Context Flush',
-    `Compacted ${old.length} earlier turns locally before sending to avoid resending stale full history.`,
-    'Preserve decisions, constraints, file names, commands, errors, and current objective from this summary:',
-    summarizeForCompaction(old),
-  ].join('\n');
-  return {
-    messages: [
-      { role: 'user', content: summary },
-      { role: 'assistant', content: 'Acknowledged. I will treat the compacted prior-context summary as the earlier conversation state.' },
-      ...recent,
-    ],
-    compactedTurns: old.length,
-  };
-}
+// estimateTokens / summarizeForCompaction / compactMessagesForSend extracted 2026-07-22/23
+// (JS/TS modularization program, task #13) -> ./chatCompaction.ts (imported at top of file).
+// Call sites now resolve the two live dependencies the extracted module deliberately does
+// NOT know about (live model context window, getConfig() knobs) and pass them in explicitly.
 
 // .5231 — publish the currently-selected model to a shared file the codex wrapper reads, so
 // "SCX Codex" launches on the SAME model the chat panel is using (operator .5231 request).
@@ -939,7 +897,7 @@ async function cmdOpenChat(ctx: vscode.ExtensionContext) {
       try {
         const cfg = getConfig();
         const ctxPrefix = buildAutoContext() + attached;
-        const compacted = compactMessagesForSend(history, cfg.defaultModel, ctxPrefix.length);
+        const compacted = compactMessagesForSend(history, modelContextTokens(cfg.defaultModel), { autocompact: cfg.autocompact, maxTokens: cfg.maxTokens }, ctxPrefix.length);
         const messagesForApi: ScxMessage[] = [...compacted.messages];
         if (ctxPrefix && messagesForApi.length > 0) {
           messagesForApi[messagesForApi.length - 1] = { role: 'user', content: ctxPrefix + msg.text };
@@ -2261,7 +2219,7 @@ class KriticalChatViewProvider implements vscode.WebviewViewProvider {
           // Prepend auto-context from the active editor + any attached file/repo context.
           const ctx = buildAutoContext() + this._attached;
           const cfg = getConfig();
-          const compacted = compactMessagesForSend(this._history, cfg.defaultModel, ctx.length);
+          const compacted = compactMessagesForSend(this._history, modelContextTokens(cfg.defaultModel), { autocompact: cfg.autocompact, maxTokens: cfg.maxTokens }, ctx.length);
           const messagesForApi: ScxMessage[] = [...compacted.messages];
           if (ctx && messagesForApi.length > 0) {
             messagesForApi[messagesForApi.length - 1] = {
