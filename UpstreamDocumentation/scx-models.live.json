@@ -1,0 +1,519 @@
+{
+  "captured_utc": "2026-07-07T08:14:16.803Z",
+  "source": "https://api.scx.ai/v1/models",
+  "status": 200,
+  "count": 12,
+  "models": [
+    {
+      "id": "MiniMax-M2.7",
+      "hugging_face_id": "MiniMaxAI/MiniMax-M2.7",
+      "name": "MiniMax-M2.7",
+      "created": 1745000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp8",
+      "context_length": 192000,
+      "max_output_length": 4096,
+      "pricing": {
+        "prompt": "0.00000068",
+        "completion": "0.0000032",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "230B sparse MoE (10B active, 256 experts, 8 per token) from MiniMax — agentic workflows, 200K context",
+      "datacenters": [
+        {
+          "country_code": "US"
+        },
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "gpt-oss-120b",
+      "hugging_face_id": "openai/gpt-oss-120b",
+      "name": "gpt-oss-120b",
+      "created": 1715000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp8",
+      "context_length": 131072,
+      "max_output_length": 131072,
+      "pricing": {
+        "prompt": "0.0000003",
+        "completion": "0.00000098",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "117B open-weight MoE (5.1B active) from OpenAI achieving near o4-mini reasoning",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "DeepSeek-V3.1",
+      "hugging_face_id": "deepseek-ai/DeepSeek-V3.1",
+      "name": "DeepSeek-V3.1",
+      "created": 1716854400,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp8",
+      "context_length": 131072,
+      "max_output_length": 7168,
+      "pricing": {
+        "prompt": "0.0000045",
+        "completion": "0.00000725",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "671B MoE model (37B active) with hybrid thinking/non-thinking modes, tool use, and 128k context",
+      "datacenters": [
+        {
+          "country_code": "US"
+        }
+      ]
+    },
+    {
+      "id": "Meta-Llama-3.3-70B-Instruct",
+      "hugging_face_id": "meta-llama/Llama-3.3-70B-Instruct",
+      "name": "Meta-Llama-3.3-70B-Instruct",
+      "created": 1700000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "bf16",
+      "context_length": 131072,
+      "max_output_length": 3072,
+      "pricing": {
+        "prompt": "0.00000095",
+        "completion": "0.00000195",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode"
+      ],
+      "description": "70B instruction-tuned model delivering 405B-class text performance with 128k context and GQA",
+      "datacenters": [
+        {
+          "country_code": "US"
+        }
+      ]
+    },
+    {
+      "id": "gemma-4-31B-it",
+      "hugging_face_id": "google/gemma-4-31B-it",
+      "name": "gemma-4-31B-it",
+      "created": 1780000000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "bf16",
+      "context_length": 131072,
+      "max_output_length": 8192,
+      "pricing": {
+        "prompt": "0.00000054",
+        "completion": "0.00000163",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "Google Gemma 4 31B dense instruction-tuned multimodal model (text + image in) with a toggleable thinking mode, native tool use, 128k context, and 140+ language coverage",
+      "datacenters": [
+        {
+          "country_code": "US"
+        },
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "Qwen3-32B",
+      "hugging_face_id": "Qwen/Qwen3-32B",
+      "name": "Qwen3-32B",
+      "created": 1710000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "bf16",
+      "context_length": 32768,
+      "max_output_length": 4096,
+      "pricing": {
+        "prompt": "0.00000065",
+        "completion": "0.00000155",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "32B dense model matching Qwen2.5-72B performance, supporting 119 languages with thinking mode toggle",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "Llama-4-Maverick-17B-128E-Instruct",
+      "hugging_face_id": "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+      "name": "Llama-4-Maverick-17B-128E-Instruct",
+      "created": 1712000000,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp8",
+      "context_length": 131072,
+      "max_output_length": 4096,
+      "pricing": {
+        "prompt": "0.00000095",
+        "completion": "0.0000029",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "json_mode"
+      ],
+      "description": "400B MoE (17B active, 128 experts) with native multimodal early fusion supporting 12 languages and images",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "MAGPiE",
+      "hugging_face_id": "",
+      "name": "MAGPiE",
+      "created": 1715000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp8",
+      "context_length": 131072,
+      "max_output_length": 131072,
+      "pricing": {
+        "prompt": "0.00000075",
+        "completion": "0.00000175",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "117B MoE model from scx.ai achieving near o4-mini reasoning",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "coder",
+      "hugging_face_id": "",
+      "name": "coder",
+      "created": 1720000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp8",
+      "context_length": 196608,
+      "max_output_length": 4096,
+      "pricing": {
+        "prompt": "0.00000085",
+        "completion": "0.00000375",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning",
+        "json_mode"
+      ],
+      "description": "High performance coding assistant with reasoning, optimized for algorithms, debugging, and code review",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "E5-Mistral-7B-Instruct",
+      "hugging_face_id": "intfloat/e5-mistral-7b-instruct",
+      "name": "E5-Mistral-7B-Instruct",
+      "created": 1700000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embeddings"
+      ],
+      "quantization": "bf16",
+      "context_length": 32768,
+      "max_output_length": null,
+      "pricing": {
+        "prompt": "0.0000002",
+        "completion": "0",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [],
+      "supported_features": [],
+      "description": "7B embedding model based on Mistral producing 4096-dim vectors for semantic search and retrieval",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "Whisper-Large-v3",
+      "hugging_face_id": "openai/whisper-large-v3",
+      "name": "Whisper-Large-v3",
+      "created": 1700000000,
+      "input_modalities": [
+        "audio"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp16",
+      "context_length": 4096,
+      "max_output_length": 4096,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0",
+        "image": "0",
+        "request": "0",
+        "input_cache_read": "0",
+        "perMinute": "0.2"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [
+        "temperature"
+      ],
+      "supported_features": [],
+      "description": "OpenAI's multilingual ASR model supporting 99+ languages for transcription and translation",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    },
+    {
+      "id": "opir-large",
+      "hugging_face_id": "knowledgator/opir-multitask-large-v1.0",
+      "name": "Opir Large",
+      "created": 1700000000,
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "quantization": "fp32",
+      "context_length": 1024,
+      "max_output_length": null,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0",
+        "image": "0",
+        "request": "0.002",
+        "input_cache_read": "0",
+        "perMinute": "0"
+      },
+      "currency": "aud",
+      "supported_sampling_parameters": [],
+      "supported_features": [
+        "moderation"
+      ],
+      "description": "Encoder guardrail classifier for content moderation across Opir's safety taxonomy (highest accuracy).",
+      "datacenters": [
+        {
+          "country_code": "AU"
+        }
+      ]
+    }
+  ]
+}

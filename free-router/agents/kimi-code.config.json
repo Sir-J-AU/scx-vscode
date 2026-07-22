@@ -1,0 +1,68 @@
+{
+  "$comment": "Kimi Code / Continue.dev configuration for Kritical Free Router",
+  "models": [
+    {
+      "title": "Kritical · OpenRouter /free (unlimited free frontier models)",
+      "provider": "openai",
+      "model": "openrouter/free",
+      "apiKey": "{{env.OPENROUTER_API_KEY}}",
+      "apiBase": "http://127.0.0.1:4182",
+      "contextLength": 131072,
+      "template": "chatml",
+      "systemMessage": "You are a helpful coding assistant. Prefer concise answers with code diffs. Never invent APIs."
+    },
+    {
+      "title": "Kritical · Gemini 2.5 Flash (Google AI Studio free tier)",
+      "provider": "openai",
+      "model": "gemini/gemini-2.5-flash",
+      "apiKey": "{{env.GOOGLE_API_KEY}}",
+      "apiBase": "http://127.0.0.1:4182",
+      "contextLength": 1000000,
+      "template": "chatml"
+    },
+    {
+      "title": "Kritical · Groq Llama 3.3 70B (fast free tier)",
+      "provider": "openai",
+      "model": "groq/llama-3.3-70b-versatile",
+      "apiKey": "{{env.GROQ_API_KEY}}",
+      "apiBase": "http://127.0.0.1:4182",
+      "contextLength": 128000,
+      "template": "chatml"
+    },
+    {
+      "title": "Kritical · DeepSeek Chat (reasoning specialist)",
+      "provider": "openai",
+      "model": "deepseek/deepseek-chat",
+      "apiKey": "{{env.DEEPSEEK_API_KEY}}",
+      "apiBase": "http://127.0.0.1:4182",
+      "contextLength": 64000,
+      "template": "chatml"
+    }
+  ],
+  "tabAutocompleteModel": {
+    "title": "Kritical · Mistral Codestral (free coding autocomplete)",
+    "provider": "openai",
+    "model": "mistral/codestral-latest",
+    "apiKey": "{{env.MISTRAL_API_KEY}}",
+    "apiBase": "http://127.0.0.1:4182"
+  },
+  "customCommands": [
+    {
+      "name": "explain",
+      "prompt": "Explain the highlighted code in plain English. Structure: (1) what it does, (2) what it depends on, (3) what breaks if misused.",
+      "description": "Human explanation of highlighted code"
+    },
+    {
+      "name": "free-refactor",
+      "prompt": "Refactor the highlighted code following best practices. Never introduce new abstractions unless they save at least 3 duplicate patterns.",
+      "description": "Refactor using free models"
+    },
+    {
+      "name": "free-review",
+      "prompt": "Review the CURRENT git diff. Check for: secrets leakage, logic errors, test coverage gaps, performance issues. Be specific with line references.",
+      "description": "Code review via free inference"
+    }
+  ],
+  "allowAnonymousTelemetry": false,
+  "disableIndexing": false
+}

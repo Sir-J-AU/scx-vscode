@@ -1,0 +1,129 @@
+{
+  "captured_utc": "2026-07-08T04:56:40.396Z",
+  "mode": "live",
+  "base_url": "https://api.scx.ai/v1",
+  "spec_path": "C:\\Users\\joshl\\OneDrive - Kritical Pty Ltd\\Github\\Kritical.SCXCode\\UpstreamDocumentation\\scx-openapi.candidate.json",
+  "live_models": {
+    "chat": "Meta-Llama-3.3-70B-Instruct",
+    "responses": "gpt-oss-120b",
+    "embeddings": "E5-Mistral-7B-Instruct"
+  },
+  "checks": [
+    {
+      "name": "spec:path:/models",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/chat/completions",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/responses",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/embeddings",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/audio/speech",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/audio/transcriptions",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/audio/translations",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/batches",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/vector-stores",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/vector-stores/{store_id}/files",
+      "status": "pass"
+    },
+    {
+      "name": "spec:path:/vector-stores/{store_id}/search",
+      "status": "pass"
+    },
+    {
+      "name": "spec:openapi-3.1.1",
+      "status": "pass"
+    },
+    {
+      "name": "spec:openai-compat-params",
+      "status": "pass"
+    },
+    {
+      "name": "spec:speech-current-surface",
+      "status": "pass"
+    },
+    {
+      "name": "spec:server-tools",
+      "status": "pass"
+    },
+    {
+      "name": "live:models",
+      "status": "pass",
+      "count": 12
+    },
+    {
+      "name": "live:chat-completions",
+      "status": "warn",
+      "result": {
+        "status": 429,
+        "ok": false,
+        "contentType": "application/json",
+        "preview": "{\"error\":{\"message\":\"Daily token limit exceeded\",\"type\":\"rate_limit_error\"}}"
+      }
+    },
+    {
+      "name": "live:responses",
+      "status": "warn",
+      "result": {
+        "status": 429,
+        "ok": false,
+        "contentType": "application/json",
+        "preview": "{\"error\":{\"message\":\"Daily token limit exceeded\",\"type\":\"rate_limit_error\"}}"
+      }
+    },
+    {
+      "name": "live:embeddings",
+      "status": "warn",
+      "result": {
+        "status": 429,
+        "ok": false,
+        "contentType": "application/json",
+        "preview": "{\"error\":{\"message\":\"Daily token limit exceeded\",\"type\":\"rate_limit_error\"}}"
+      }
+    },
+    {
+      "name": "live:batches-list",
+      "status": "pass",
+      "result": {
+        "status": 200,
+        "ok": true,
+        "contentType": "application/json",
+        "preview": "{\"object\":\"list\",\"data\":[],\"has_more\":false}"
+      }
+    },
+    {
+      "name": "live:vector-stores-list",
+      "status": "pass",
+      "result": {
+        "status": 200,
+        "ok": true,
+        "contentType": "application/json",
+        "preview": "{\"data\":[]}"
+      }
+    }
+  ],
+  "failed": 0
+}

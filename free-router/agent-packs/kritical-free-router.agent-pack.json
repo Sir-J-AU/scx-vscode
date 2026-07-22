@@ -1,0 +1,86 @@
+{
+  "$schema": "https://kritical.net/schemas/agent-pack/v1",
+  "id": "kritical-free-router",
+  "name": "Kritical Free Router Agent Pack",
+  "version": "1.0.0",
+  "updated_utc": "2026-07-07T00:00:00Z",
+  "author": "Joshua Finley",
+  "company": "Kritical Pty Ltd",
+  "copyright": "(c) 2026 Kritical Pty Ltd. All rights reserved.",
+  "purpose": "Route coding agents through the local Kritical free-first LiteLLM router.",
+  "router": {
+    "name": "Kritical Free Router",
+    "base_url": "http://127.0.0.1:4182/v1",
+    "health_url": "http://127.0.0.1:4182/health/liveliness",
+    "local_master_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+    "local_master_key_default": "sk-kritical-free-local",
+    "config": "litellm/kritical-scx-free.config.yaml",
+    "start_command": "pwsh free-router/scripts/Start-KritFreeRouter.ps1 -Mode Start -Config free"
+  },
+  "provider_priority": [
+    "openrouter-free",
+    "mistral-free",
+    "google-ai-studio",
+    "together-free",
+    "groq-free",
+    "deepseek-open",
+    "fireworks-free",
+    "cohere-free",
+    "ollama-local",
+    "lmstudio-local"
+  ],
+  "models": {
+    "default": "free-default",
+    "coding": "free-coding",
+    "reasoning": "free-reasoning",
+    "fast": "free-groq-llama",
+    "fallback": "paid-scx-coder"
+  },
+  "tools": {
+    "claude": {
+      "kind": "openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "notes": "Use this only where Claude-compatible tooling accepts OpenAI-compatible endpoints. Native Claude remains untouched."
+    },
+    "codex": {
+      "kind": "responses-or-chat-openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "notes": "Free-router mode is optional. SCX-native Codex remains in codex-wrapper."
+    },
+    "continue": {
+      "kind": "continue.dev",
+      "provider": "openai",
+      "apiBase": "http://127.0.0.1:4182/v1",
+      "apiKeyEnv": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding"
+    },
+    "aider": {
+      "kind": "openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "openai/free-coding"
+    },
+    "cline": {
+      "kind": "openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding"
+    },
+    "deepcode": {
+      "kind": "openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-deepseek-chat",
+      "vscode_settings": {
+        "deepcode.apiBase": "http://127.0.0.1:4182/v1",
+        "deepcode.apiKeyEnv": "KRIT_FREE_ROUTER_MASTER_KEY",
+        "deepcode.model": "free-deepseek-chat"
+      }
+    }
+  },
+  "kill_switch": "Stop the free router or do not install this pack. Each tool can return to its native config."
+}

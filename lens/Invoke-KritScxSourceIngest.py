@@ -78,9 +78,9 @@ for p in files:
     # made the "byte-exact" claim false. COMPRESS(<varbinary>) -> DECOMPRESS() is an exact byte round-trip.
     blob = pyodbc.Binary(raw)
     cur.execute("""MERGE dbo.LensSource AS t USING (SELECT ? repo, ? path) s ON (t.repo=s.repo AND t.path=s.path)
-        WHEN MATCHED THEN UPDATE SET content_sha256=?, content_gz=COMPRESS(?), byte_len=?, line_count=?, wave=?, ingested_utc=SYSUTCDATETIME()
+        WHEN MATCHED THEN UPDATE SET content_sha256=?, content_gz=COMPRESS(CONVERT(VARBINARY(MAX), ?)), byte_len=?, line_count=?, wave=?, ingested_utc=SYSUTCDATETIME()
         WHEN NOT MATCHED THEN INSERT(repo,path,ext,content_sha256,content_gz,byte_len,line_count,wave)
-             VALUES(?,?,?,?,COMPRESS(?),?,?,?);""",
+             VALUES(?,?,?,?,COMPRESS(CONVERT(VARBINARY(MAX), ?)),?,?,?);""",
         repo, rel, sha, blob, len(raw), lc, WAVE,
         repo, rel, os.path.splitext(p)[1], sha, blob, len(raw), lc, WAVE)
     ingested += 1

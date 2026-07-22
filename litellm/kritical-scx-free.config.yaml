@@ -1,0 +1,190 @@
+# ============================================================
+# Kritical LiteLLM proxy — FREE-FIRST configuration
+# ------------------------------------------------------------
+# Prioritizes free inference providers over paid tiers.
+# Ideal for: prototyping, CI/CD, open-source contributors,
+# cost-sensitive workloads, and the Kritical free-tools showcase.
+#
+# Provider priority (most generous first):
+#   1. OpenRouter /free        — unlimited, rotating free models
+#   2. Mistral Free            — operator-verified 2B tokens/day
+#   3. Google AI Studio        — 15 RPM, 1M TPM (Gemini)
+#   4. Together AI Free        — ~1M tokens/day
+#   5. Groq Free Tier          — ~500K tokens/day, 1K tok/sec
+#   6. DeepSeek Open API       — extremely cheap, occasional free credits
+#   7. Fireworks AI Free       — ~500K tokens/day
+#   8. Cohere Free             — ~1M tokens/month
+#   9. Ollama / LM Studio      — local, truly free
+#
+# REQUIRED env vars (HKCU):
+#   OPENROUTER_API_KEY
+#   GOOGLE_API_KEY
+#   GROQ_API_KEY
+#   TOGETHER_API_KEY
+#   DEEPSEEK_API_KEY
+#   FIREWORKS_API_KEY
+#   COHERE_API_KEY
+#   MISTRAL_API_KEY
+#
+# OPTIONAL:
+#   SCX_API_KEY — fallback to paid SCX tier when all free exhausted
+#
+# Per HR29: additive. Stop proxy → agents fall back to direct API.
+# Author: Joshua Finley — (c) 2026 Kritical Pty Ltd
+# ============================================================
+
+model_list:
+  # -------- TIER 1: OpenRouter /free (unlimited) -----------
+  - model_name: free-default
+    litellm_params:
+      model: openrouter/openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: free-coding
+    litellm_params:
+      model: openrouter/openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: free-reasoning
+    litellm_params:
+      model: openrouter/openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # -------- TIER 2: Mistral (operator-verified 2B/day) ------
+  - model_name: free-mistral-codestral
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  # Specific OpenRouter free models for deterministic routing
+  - model_name: free-gpt-oss-120b
+    litellm_params:
+      model: openrouter/openai/gpt-oss-120b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: free-nemotron-super
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: free-llama-3.3-70b
+    litellm_params:
+      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: free-qwen3-coder
+    litellm_params:
+      model: openrouter/qwen/qwen3-coder:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # -------- TIER 3: Google AI Studio (Gemini) ---------------
+  - model_name: free-gemini-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: free-gemini-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # -------- TIER 4: Groq (speed demon) ----------------------
+  - model_name: free-groq-llama
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: free-groq-gemma
+    litellm_params:
+      model: groq/gemma2-9b-it
+      api_key: os.environ/GROQ_API_KEY
+
+  # -------- TIER 5: Together AI -----------------------------
+  - model_name: free-together-llama
+    litellm_params:
+      model: together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo
+      api_key: os.environ/TOGETHER_API_KEY
+
+  # -------- TIER 6: DeepSeek --------------------------------
+  - model_name: free-deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  - model_name: free-deepseek-reasoner
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  # -------- TIER 7: Fireworks AI ----------------------------
+  - model_name: free-fireworks-llama
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/llama-v3p3-70b-instruct
+      api_key: os.environ/FIREWORKS_API_KEY
+
+  # -------- TIER 8: Cohere ----------------------------------
+  - model_name: free-cohere-command
+    litellm_params:
+      model: cohere/command-r
+      api_key: os.environ/COHERE_API_KEY
+
+  # -------- TIER 9: Local (Ollama / LM Studio) --------------
+  - model_name: free-ollama
+    litellm_params:
+      model: ollama/llama3.3
+      api_base: http://localhost:11434
+
+  - model_name: free-lmstudio
+    litellm_params:
+      model: openai/local-model
+      api_base: http://localhost:1234/v1
+      api_key: dummy-key
+
+  # -------- PAID FALLBACK: SCX (when free exhausted) --------
+  - model_name: paid-minimax-m2.7
+    litellm_params:
+      model: openai/MiniMax-M2.7
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: paid-scx-coder
+    litellm_params:
+      model: openai/coder
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+# -----------------------------------------------------------
+# Router: free-first with SCX fallback
+# -----------------------------------------------------------
+router_settings:
+  routing_strategy: simple-shuffle
+  fallbacks:
+    - free-default:          [free-mistral-codestral, free-gpt-oss-120b, free-gemini-flash, free-groq-llama, paid-minimax-m2.7, paid-scx-coder]
+    - free-coding:           [free-mistral-codestral, free-qwen3-coder, free-groq-llama, paid-scx-coder]
+    - free-reasoning:        [free-gpt-oss-120b, free-deepseek-reasoner, free-gemini-pro]
+    - free-gpt-oss-120b:     [free-nemotron-super, free-gemini-flash]
+    - free-gemini-flash:     [free-gemini-pro, free-default]
+    - free-groq-llama:       [free-together-llama, free-groq-gemma]
+    - free-together-llama:   [free-fireworks-llama, free-groq-llama]
+    - free-deepseek-chat:    [free-deepseek-reasoner, free-default]
+    - free-mistral-codestral: [free-qwen3-coder, free-groq-llama]
+
+  num_retries: 3
+  timeout: 120
+  retry_after: 5
+  allowed_fails: 3
+  cooldown_time: 60
+
+general_settings:
+  master_key: sk-kritical-free-local
+  drop_params: true
+  disable_spend_logs: false
+  disable_error_logs: false
+
+litellm_settings:
+  set_verbose: false
+  json_logs: true
+  turn_off_message_logging: false
+
+# Run via:
+#   litellm --config kritical-scx-free.config.yaml --host 127.0.0.1 --port 4182

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://kritical.net/schemas/coding-tool-runtime-registry/v1",
+  "updated_utc": "2026-07-08T00:00:00Z",
+  "purpose": "Local executable coding-tool registry for Kritical CodingSystem.",
+  "defaults": {
+    "dry_run_timeout_sec": 6,
+    "execute_timeout_sec": 900,
+    "allow_execute_by_default": false
+  },
+  "tools": {
+    "codex": {
+      "display_name": "OpenAI Codex CLI",
+      "command": "codex",
+      "version_args": ["--version"],
+      "help_args": ["--help"],
+      "execute": {
+        "enabled": true,
+        "args": ["exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--"],
+        "prompt_mode": "append_arg",
+        "notes": "Use only inside explicitly selected repos/worktrees. Kritical configs should route through the selected local/free/SCX endpoint before enabling."
+      },
+      "provider_overlay": {
+        "free_base_url": "http://127.0.0.1:4182/v1",
+        "scx_shim_url": "http://127.0.0.1:4199/v1"
+      }
+    },
+    "claude": {
+      "display_name": "Anthropic Claude Code CLI",
+      "command": "claude",
+      "version_args": ["--version"],
+      "help_args": ["--help"],
+      "execute": {
+        "enabled": true,
+        "args": ["-p"],
+        "prompt_mode": "append_arg",
+        "notes": "Native Claude Code path. Keep native auth/config intact; use when explicitly selected."
+      }
+    },
+    "opencode": {
+      "display_name": "OpenCode CLI",
+      "command": "opencode",
+      "version_args": ["--version"],
+      "help_args": ["--help"],
+      "execute": {
+        "enabled": true,
+        "args": ["run"],
+        "prompt_mode": "append_arg",
+        "notes": "OpenCode help confirms `opencode run [message..]`. Use only in explicit target repos."
+      }
+    },
+    "kilo": {
+      "display_name": "Kilo Code CLI",
+      "command": "kilo",
+      "version_args": ["--version"],
+      "help_args": ["--help"],
+      "execute": {
+        "enabled": false,
+        "args": [],
+        "prompt_mode": "unsupported",
+        "notes": "Installable via @kilocode/cli. Native non-interactive prompt/config contract must be proven after install."
+      }
+    },
+    "aider": {
+      "display_name": "Aider",
+      "command": "uvx",
+      "version_args": ["--python", "3.12", "--from", "aider-chat", "aider", "--version"],
+      "help_args": ["--python", "3.12", "--from", "aider-chat", "aider", "--help"],
+      "execute": {
+        "enabled": true,
+        "args": ["--python", "3.12", "--from", "aider-chat", "aider", "--yes-always", "--message"],
+        "prompt_mode": "append_arg",
+        "notes": "Patch-focused git agent through uvx-managed Python 3.12. Use only in explicit target repos."
+      }
+    },
+    "hermes": {
+      "display_name": "Hermes Agent",
+      "command": "hermes",
+      "version_args": ["--version"],
+      "help_args": ["--help"],
+      "execute": {
+        "enabled": false,
+        "args": [],
+        "prompt_mode": "unsupported",
+        "notes": "Detect-only until native installed client/provider contract is confirmed."
+      }
+    }
+  }
+}

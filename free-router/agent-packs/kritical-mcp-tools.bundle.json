@@ -1,0 +1,98 @@
+{
+  "$schema": "https://kritical.net/schemas/mcp-bundle/v1",
+  "id": "kritical-scxcode-mcp-tools",
+  "name": "Kritical SCXCode MCP Tool Bundle",
+  "version": "1.0.0",
+  "updated_utc": "2026-07-08T00:00:00Z",
+  "purpose": "Reusable MCP server bundle for Kilo, Cline, Roo Code, Continue-compatible agents, Codex shims, and Kritical supervisors.",
+  "servers": {
+    "kritical-scxcode": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "mcp-server/server.mjs"
+      ],
+      "env": {
+        "SCX_API_KEY": "${SCX_API_KEY}"
+      },
+      "capabilities": [
+        "scx_chat",
+        "scx_models",
+        "scx_embeddings"
+      ],
+      "notes": "SCX API MCP surface. Requires SCX_API_KEY."
+    },
+    "kritical-store": {
+      "transport": "stdio",
+      "command": "python",
+      "args": [
+        "store-mcp/kritical_store_mcp.py"
+      ],
+      "env": {
+        "KRITICAL_SCXCODE_STORE_CONNECTION_STRING": "${KRITICAL_SCXCODE_STORE_CONNECTION_STRING}"
+      },
+      "capabilities": [
+        "sql_store_query",
+        "repo_context_lookup",
+        "decision_log_lookup"
+      ],
+      "notes": "Read-only SQL Server/FastMCP store surface."
+    },
+    "kritical-local-store": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "store-mcp/kritical-local-store.mjs"
+      ],
+      "capabilities": [
+        "mine",
+        "search",
+        "symbols",
+        "stats"
+      ],
+      "notes": "Local SQLite file/symbol index."
+    },
+    "kritical-chunk-store": {
+      "transport": "http",
+      "url": "http://127.0.0.1:4270",
+      "token_file": "~/.kritical-scx/chunk-token.txt",
+      "capabilities": [
+        "chunk",
+        "reassemble",
+        "synthetic_context",
+        "apply"
+      ],
+      "notes": "Chunk server must be started separately. Localhost only."
+    },
+    "kritical-supervisor": {
+      "transport": "command",
+      "command": "python",
+      "args": [
+        "mux/Invoke-KritAgentSupervisor.py",
+        "--mode",
+        "dry-run",
+        "--sqlite",
+        "out/supervisor.sqlite",
+        "--report",
+        "out/supervisor.md",
+        "--prompt"
+      ],
+      "capabilities": [
+        "batch_plan",
+        "lane_score",
+        "free_plus_scx_synthesis"
+      ],
+      "notes": "Command-style entrypoint for agents that can call local commands."
+    }
+  },
+  "recommended_permissions": {
+    "read": "allow",
+    "grep": "allow",
+    "glob": "allow",
+    "edit": "ask",
+    "bash": "ask",
+    "network": "ask",
+    "secrets": "deny"
+  },
+  "kill_switch": "Remove this bundle from the agent MCP settings or stop each local server."
+}

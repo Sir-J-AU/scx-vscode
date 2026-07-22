@@ -1,0 +1,210 @@
+{
+  "$schema": "https://kritical.net/schemas/agent-pack/v1",
+  "id": "kritical-agentic-mega-pipeline",
+  "name": "Kritical Agentic Mega Pipeline",
+  "version": "1.0.0",
+  "updated_utc": "2026-07-08T00:00:00Z",
+  "author": "Joshua Finley",
+  "company": "Kritical Pty Ltd",
+  "copyright": "(c) 2026 Kritical Pty Ltd. All rights reserved.",
+  "purpose": "Coordinate stock coding agents, Kilo-style agent surfaces, SCXCode MCP/tools, free-router lanes, SCX-native lanes, and Kritical supervisor lanes without modifying upstream tools.",
+  "router": {
+    "name": "Kritical Dual Plane",
+    "free_base_url": "http://127.0.0.1:4182/v1",
+    "free_health_url": "http://127.0.0.1:4182/health/liveliness",
+    "free_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+    "free_key_default": "sk-kritical-free-local",
+    "scx_base_url": "https://api.scx.ai/v1",
+    "scx_key_env": "SCX_API_KEY",
+    "codex_shim_url": "http://127.0.0.1:4199/v1",
+    "chunk_server_url": "http://127.0.0.1:4270",
+    "supervisor_command": "python mux/Invoke-KritAgentSupervisor.py --mode dry-run --prompt \"<design prompt>\" --sqlite out/supervisor.sqlite --report out/supervisor.md"
+  },
+  "model_planes": {
+    "free": {
+      "default": "free-default",
+      "coding": "free-coding",
+      "reasoning": "free-reasoning",
+      "provider_priority": [
+        "openrouter-free",
+        "mistral-free",
+        "google-ai-studio",
+        "together-free",
+        "groq-free",
+        "deepseek-open",
+        "fireworks-free",
+        "cohere-free",
+        "ollama-local",
+        "lmstudio-local"
+      ]
+    },
+    "scx": {
+      "default": "MiniMax-M2.7",
+      "coding": "coder",
+      "reasoning": "MAGPiE",
+      "hard_debug": "DeepSeek-V3.1",
+      "cheap_reasoning": "gpt-oss-120b",
+      "embedding": "E5-Mistral-7B-Instruct"
+    }
+  },
+  "tools": {
+    "kilo": {
+      "kind": "agentic-ide-cli-openai-compatible",
+      "surfaces": [
+        "vscode",
+        "jetbrains",
+        "cli",
+        "cloud"
+      ],
+      "extension_id": "kilocode.kilo-code",
+      "cli_package": "@kilocode/cli",
+      "preferred_base_url": "http://127.0.0.1:4182/v1",
+      "fallback_base_url": "https://api.scx.ai/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "fallback_api_key_env": "SCX_API_KEY",
+      "model": "free-coding",
+      "fallback_model": "coder",
+      "mcp_bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+      "notes": "Use Kilo as the high-autonomy IDE/CLI agent when installed. Keep its native gateway/account flow intact; Kritical snippets only add local free-router and SCX planes."
+    },
+    "cline": {
+      "kind": "agentic-vscode-openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "mcp_bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+      "notes": "Best open-source VS Code tool for explicit MCP-heavy plan/act workflows."
+    },
+    "roo-code": {
+      "kind": "agentic-vscode-openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "mcp_bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+      "notes": "Roo Code follows the same OpenAI-compatible/MCP overlay pattern as Cline where installed."
+    },
+    "continue": {
+      "kind": "declarative-chat-assistant",
+      "provider": "openai",
+      "apiBase": "http://127.0.0.1:4182/v1",
+      "apiKeyEnv": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "notes": "Best for policy-as-code config and lower-autonomy chat/context workflows."
+    },
+    "codex": {
+      "kind": "responses-or-chat-openai-compatible",
+      "free_base_url": "http://127.0.0.1:4182/v1",
+      "scx_responses_base_url": "http://127.0.0.1:4199/v1",
+      "api_key_env": "SCX_API_KEY",
+      "model": "coder",
+      "notes": "Use SCX shim for Responses/tool-shape normalization; free-router mode is optional for OpenAI-compatible chat paths."
+    },
+    "claude-code": {
+      "kind": "native-agent-plus-optional-openai-compatible-overlay",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "notes": "Native Claude Code remains untouched; overlay only applies where custom endpoint support is available."
+    },
+    "opencode": {
+      "kind": "terminal-agent-openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-coding",
+      "notes": "Terminal-native peer to Claude Code/Codex when installed."
+    },
+    "hermes": {
+      "kind": "terminal-autonomous-agent-provider-router",
+      "preferred_base_url": "http://127.0.0.1:4182/v1",
+      "fallback_base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "fallback_api_key_env": "OPENROUTER_API_KEY",
+      "model": "free-reasoning",
+      "fallback_model": "nousresearch/hermes-3-llama-3.1-405b:free",
+      "mcp_bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+      "notes": "Hermes Agent is useful for persistent-memory autonomous workflows. Configure through its native provider settings; Kritical supplies free-router/OpenRouter and MCP references."
+    },
+    "openclaw": {
+      "kind": "self-hosted-24x7-agent",
+      "preferred_base_url": "http://127.0.0.1:4182/v1",
+      "fallback_base_url": "https://api.scx.ai/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "fallback_api_key_env": "SCX_API_KEY",
+      "model": "free-coding",
+      "fallback_model": "MiniMax-M2.7",
+      "mcp_bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+      "instructions": ".kritical/AGENT-INSTRUCTIONS.md",
+      "notes": "Use only with tight repo boundaries, least-privilege tool permissions, and sandboxed worktrees. Kritical does not auto-enable broad OS/browser/email control."
+    },
+    "kiloclaw": {
+      "kind": "hosted-openclaw-account-managed",
+      "gateway_base_url": "https://api.kilo.ai/api/gateway",
+      "mcp_bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+      "instructions": ".kritical/AGENT-INSTRUCTIONS.md",
+      "notes": "Hosted OpenClaw through Kilo. Treat model spend as account-managed; Kritical can supply instructions and MCP shape but does not bypass Kilo billing or governance."
+    },
+    "aider": {
+      "kind": "terminal-agent-openai-compatible",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "openai/free-coding",
+      "notes": "Useful for patch-focused repo work with explicit git diffs."
+    },
+    "deepcode": {
+      "kind": "openai-compatible-review-tool",
+      "base_url": "http://127.0.0.1:4182/v1",
+      "api_key_env": "KRIT_FREE_ROUTER_MASTER_KEY",
+      "model": "free-deepseek-chat",
+      "vscode_settings": {
+        "deepcode.apiBase": "http://127.0.0.1:4182/v1",
+        "deepcode.apiKeyEnv": "KRIT_FREE_ROUTER_MASTER_KEY",
+        "deepcode.model": "free-deepseek-chat"
+      }
+    },
+    "github-copilot-agent-hq": {
+      "kind": "account-managed-agent",
+      "notes": "Use for GitHub issue/PR-native delegation when available. Kritical does not override account-managed model routing."
+    },
+    "amazon-q-developer": {
+      "kind": "account-managed-agent",
+      "notes": "Use for AWS/IAM/CDK/CloudFormation-heavy tasks. Kritical does not inject free-router credentials into account-managed AWS auth."
+    },
+    "gemini-code-assist": {
+      "kind": "account-managed-agent",
+      "notes": "Use for GCP/Android-heavy tasks. Free Gemini API keys remain available through the free-router plane where direct OpenAI-compatible routing is needed."
+    },
+    "cursor": {
+      "kind": "separate-editor",
+      "notes": "Cursor is not a VS Code extension. Treat it as a separate app; do not mutate stock VS Code config to support it."
+    },
+    "windsurf": {
+      "kind": "separate-editor",
+      "notes": "Windsurf is a separate editor. Treat it as optional external surface, not a Kritical-required dependency."
+    }
+  },
+  "mcp": {
+    "bundle": "free-router/agent-packs/kritical-mcp-tools.bundle.json",
+    "servers": [
+      "kritical-scxcode",
+      "kritical-store",
+      "kritical-chunk-store",
+      "github",
+      "filesystem",
+      "terminal"
+    ]
+  },
+  "supervisor": {
+    "entrypoint": "mux/Invoke-KritAgentSupervisor.py",
+    "sqlite": "out/supervisor.sqlite",
+    "report": "out/supervisor.md",
+    "lanes": [
+      "free-coding",
+      "free-reasoning",
+      "scx-coder",
+      "scx-minimax"
+    ],
+    "batching": "Group cheap/free exploration first, reserve SCX lanes for synthesis, validation, hard debugging, and final response.",
+    "response_policy": "Return a concise operator-ready plan, changed-file summary, verification evidence, and explicit unresolved blockers."
+  },
+  "kill_switch": "Delete the generated pack directory, stop local routers/shims, or ignore these snippets. Underlying Kilo, Claude Code, Codex, Cline, Continue, Copilot, Q, Gemini, Cursor, and Windsurf configs remain native."
+}

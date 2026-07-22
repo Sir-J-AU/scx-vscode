@@ -9,10 +9,12 @@
     Providers handled (add rows as new CLIs land — each is a hashtable in $CLI_MAP):
       claude    (@anthropic-ai/claude-code)   -> npm global
       codex     (@openai/codex)               -> npm global
+      kilo      (@kilocode/cli)                -> npm global
       opencode  (opencode-ai)                 -> npm global
       openai    (openai-cli)                  -> pip
       gemini    (google-cloud-cli or npm)     -> winget preferred
       aider     (aider-chat)                  -> pip / pipx preferred
+      hermes    (Hermes Agent)                -> detected if present; install command is documented, not forced
 
     Every CLI row declares:
       Check   : path/pattern to detect existing install
@@ -33,13 +35,13 @@
 
 .EXAMPLE
     pwsh Install-KritAiCLIs.ps1 -Mode Status
-    pwsh Install-KritAiCLIs.ps1 -Mode Install -Only codex,opencode
+    pwsh Install-KritAiCLIs.ps1 -Mode Install -Only codex,opencode,kilo
     pwsh Install-KritAiCLIs.ps1 -Mode Heal
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Install','Remove','Heal','Status')][string]$Mode = 'Install',
-    [ValidateSet('claude','codex','opencode','openai','gemini','aider','all')][string[]]$Only = @('all'),
+    [ValidateSet('claude','codex','kilo','opencode','openai','gemini','aider','hermes','all')][string[]]$Only = @('all'),
     [switch]$SkipPathHeal
 )
 
@@ -71,6 +73,16 @@ $CLI_MAP = @{
         TestCmd     = { param($bin) & $bin --version 2>&1 | Out-String }
         Homepage    = 'https://github.com/openai/codex'
     }
+    'kilo' = @{
+        DisplayName = 'Kilo Code CLI'
+        NpmPackage  = '@kilocode/cli'
+        BinName     = 'kilo.cmd'
+        InstallCmd  = { npm install -g @kilocode/cli --silent 2>&1 | Out-String }
+        RemoveCmd   = { npm uninstall -g @kilocode/cli 2>&1 | Out-String }
+        TestCmd     = { param($bin) & $bin --version 2>&1 | Out-String }
+        Homepage    = 'https://kilo.ai/docs'
+        Note        = 'Kilo also ships VS Code and JetBrains extensions. CLI config must be verified after install because native settings may change by release.'
+    }
     'opencode' = @{
         DisplayName = 'OpenCode AI CLI'
         NpmPackage  = 'opencode-ai'
@@ -91,12 +103,23 @@ $CLI_MAP = @{
     }
     'aider' = @{
         DisplayName = 'Aider AI pair-programmer'
-        PipPackage  = 'aider-chat'
-        BinName     = 'aider'
-        InstallCmd  = { pip install --user aider-chat --quiet 2>&1 | Out-String }
-        RemoveCmd   = { pip uninstall -y aider-chat 2>&1 | Out-String }
-        TestCmd     = { param($bin) & $bin --version 2>&1 | Out-String }
+        UvxPackage  = 'aider-chat'
+        BinName     = 'uvx.exe'
+        InstallCmd  = { uvx --python 3.12 --from aider-chat aider --version 2>&1 | Out-String }
+        RemoveCmd   = { 'Aider is run through uvx cache; remove with uv cache clean if required.' }
+        TestCmd     = { param($bin) & $bin --python 3.12 --from aider-chat aider --version 2>&1 | Out-String }
         Homepage    = 'https://aider.chat'
+        Note        = 'Uses uvx with Python 3.12 because Python 3.14 pip install currently fails during build isolation.'
+    }
+    'hermes' = @{
+        DisplayName = 'Nous Hermes Agent'
+        BinName     = 'hermes.cmd'
+        InstallMode = 'detect-only'
+        InstallCmd  = { 'Hermes Agent install is release-channel dependent. See https://hermes-agent.nousresearch.com/docs/integrations/providers and use Status after native install.' }
+        RemoveCmd   = { 'Hermes Agent removal is skipped by Kritical installer because ownership cannot be proven.' }
+        TestCmd     = { param($bin) & $bin --version 2>&1 | Out-String }
+        Homepage    = 'https://hermes-agent.nousresearch.com/docs/integrations/providers'
+        Note        = 'Detected-only until exact local install channel is confirmed. Configure providers through OpenRouter/Ollama/vLLM/free-router where supported.'
     }
     'gemini' = @{
         DisplayName = 'Google Gemini CLI (via gcloud)'
@@ -149,9 +172,14 @@ function Install-OneCLI { param([string]$name, [hashtable]$row)
     }
     # Choose package manager based on row shape
     $usePM = if ($row.NpmPackage) { 'npm' }
+             elseif ($row.UvxPackage) { 'uvx' }
              elseif ($row.PipPackage) { 'pip' }
              elseif ($row.WingetId)   { 'winget' }
+             elseif ($row.InstallMode -eq 'detect-only') { 'detect-only' }
              else                     { 'unknown' }
+    if ($usePM -eq 'detect-only') {
+        return @{ Status = 'SKIP-DETECT-ONLY'; Bin = $null; Version = $null; Note = $row.Note }
+    }
     if (-not (Test-PackageManager $usePM)) {
         return @{ Status = "FAIL-NO-PM ($usePM missing)"; Bin = $null; Version = $null }
     }

@@ -1,0 +1,552 @@
+{
+  "captured_utc": "2026-07-07T08:14:28.059Z",
+  "seeds": [
+    "https://platform.scx.ai/docs",
+    "https://platform.scx.ai/api-reference"
+  ],
+  "official_openapi_found": false,
+  "official_openapi_url": null,
+  "model_catalog_count": 12,
+  "page_count": 44,
+  "endpoint_count": 28,
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/audio/speech",
+      "summary": "Create speech"
+    },
+    {
+      "method": "POST",
+      "path": "/audio/transcriptions",
+      "summary": "Create transcription"
+    },
+    {
+      "method": "POST",
+      "path": "/audio/translations",
+      "summary": "Create translation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/audio/voices/{voice_id}",
+      "summary": "Delete voice"
+    },
+    {
+      "method": "GET",
+      "path": "/audio/voices",
+      "summary": "List voices"
+    },
+    {
+      "method": "POST",
+      "path": "/audio/voices",
+      "summary": "Create voice"
+    },
+    {
+      "method": "POST",
+      "path": "/batches/{batch_id}/cancel",
+      "summary": "Cancel batch"
+    },
+    {
+      "method": "GET",
+      "path": "/batches/{batch_id}",
+      "summary": "Retrieve batch"
+    },
+    {
+      "method": "GET",
+      "path": "/batches",
+      "summary": "List batches"
+    },
+    {
+      "method": "POST",
+      "path": "/batches",
+      "summary": "Create batch"
+    },
+    {
+      "method": "POST",
+      "path": "/chat/completions",
+      "summary": "Create chat completion"
+    },
+    {
+      "method": "POST",
+      "path": "/completions",
+      "summary": "Create completion"
+    },
+    {
+      "method": "POST",
+      "path": "/embeddings",
+      "summary": "Create embeddings"
+    },
+    {
+      "method": "POST",
+      "path": "/messages",
+      "summary": "Create message"
+    },
+    {
+      "method": "GET",
+      "path": "/models",
+      "summary": "List models"
+    },
+    {
+      "method": "POST",
+      "path": "/moderations",
+      "summary": "Create moderation"
+    },
+    {
+      "method": "WS",
+      "path": "/realtime",
+      "summary": "Realtime audio (WebSocket)"
+    },
+    {
+      "method": "DELETE",
+      "path": "/responses/{response_id}",
+      "summary": "Delete response"
+    },
+    {
+      "method": "GET",
+      "path": "/responses/{response_id}",
+      "summary": "Retrieve response"
+    },
+    {
+      "method": "POST",
+      "path": "/responses",
+      "summary": "Create response"
+    },
+    {
+      "method": "DELETE",
+      "path": "/vector-stores/{store_id}/files/{file_id}",
+      "summary": "Delete file"
+    },
+    {
+      "method": "GET",
+      "path": "/vector-stores/{store_id}/files",
+      "summary": "List files"
+    },
+    {
+      "method": "POST",
+      "path": "/vector-stores/{store_id}/files",
+      "summary": "Upload file"
+    },
+    {
+      "method": "POST",
+      "path": "/vector-stores/{store_id}/search",
+      "summary": "Search"
+    },
+    {
+      "method": "DELETE",
+      "path": "/vector-stores/{store_id}",
+      "summary": "Delete vector store"
+    },
+    {
+      "method": "GET",
+      "path": "/vector-stores/{store_id}",
+      "summary": "Retrieve vector store"
+    },
+    {
+      "method": "GET",
+      "path": "/vector-stores",
+      "summary": "List vector stores"
+    },
+    {
+      "method": "POST",
+      "path": "/vector-stores",
+      "summary": "Create vector store"
+    }
+  ],
+  "pages": [
+    {
+      "url": "https://platform.scx.ai/docs",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "958a7469bcb62589872b9fd321632bc8c2a4b7a3686ae2a7045ee9b8971a6a8b",
+      "text_file": "pages/docs.txt",
+      "html_file": "pages/docs.html",
+      "preview_240": "SCX.ai Docs Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision Sign in Platform Docs API Reference"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "40b5c7e0c58773d77b675ec13d6d33b1ed00d6176026ca9305330c27c4090bd9",
+      "text_file": "pages/api-reference.txt",
+      "html_file": "pages/api-reference.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Sign in Platform Docs AP"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/audio",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "fd94c939924559fe9804d12ffc92cc156a13e3ef9b02962aa4da9a8079a3092d",
+      "text_file": "pages/docs__guides__audio.txt",
+      "html_file": "pages/docs__guides__audio.html",
+      "preview_240": "Implement Audio‑Input Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Visio"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/batches",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "10a9dd76429db81077398fb4ae613581b07eabfdfd68d782a83dfcefdac69c4a",
+      "text_file": "pages/docs__guides__batches.txt",
+      "html_file": "pages/docs__guides__batches.html",
+      "preview_240": "Batch Processing - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision Sign in Plat"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/embeddings",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "d796194f36fd8669b877a6bac29d2c6abf7bd40b4485ff3180a05783d92e6de3",
+      "text_file": "pages/docs__guides__embeddings.txt",
+      "html_file": "pages/docs__guides__embeddings.html",
+      "preview_240": "Implement Embeddings Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/function-calling",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "1cdba31d08471b146b0d222cff4f08b74d3f7c75f8ccad05643c7d5f60d19825",
+      "text_file": "pages/docs__guides__function-calling.txt",
+      "html_file": "pages/docs__guides__function-calling.html",
+      "preview_240": "Implement Function Calling Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores "
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/images-vision",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "1372d3b07d786ae7ed8bab75efd6b8218758c01bfcd667016cb4bd359346d831",
+      "text_file": "pages/docs__guides__images-vision.txt",
+      "html_file": "pages/docs__guides__images-vision.html",
+      "preview_240": "Implement Vision and Multimodal Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector st"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/openai-compatibility",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "e1a166631be4195ace27a8626fbaf5996c7fc5b9fa7486070ddab7cd907d3c89",
+      "text_file": "pages/docs__guides__openai-compatibility.txt",
+      "html_file": "pages/docs__guides__openai-compatibility.html",
+      "preview_240": "Implement OpenAI-Compatible Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/speech",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "d9d04393d8735a12189246764708d0c377ff2d4ded8f4c7de50d8bdc5d9db25c",
+      "text_file": "pages/docs__guides__speech.txt",
+      "html_file": "pages/docs__guides__speech.html",
+      "preview_240": "Implement Text‑to‑Speech Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vi"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/structured-outputs",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "08b98eeb60a2670b6e668eb63f92328fe1620b96a57ec1dc56826098bc83868d",
+      "text_file": "pages/docs__guides__structured-outputs.txt",
+      "html_file": "pages/docs__guides__structured-outputs.html",
+      "preview_240": "Structured Outputs Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision S"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/text",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "470c6b8d166f7dc4de1cc2e2d0cea425e9a9b7b255bbdadba1756aa8241d73d3",
+      "text_file": "pages/docs__guides__text.txt",
+      "html_file": "pages/docs__guides__text.html",
+      "preview_240": "Implement Text Generation Features - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores V"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/vapi",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "d342197ffc107ee33d92266b19124e0cb92f3eb90a352045e51278bdf1b5085d",
+      "text_file": "pages/docs__guides__vapi.txt",
+      "html_file": "pages/docs__guides__vapi.html",
+      "preview_240": "Wire a Vapi Assistant to the SCX.ai Stack Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision Sign "
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/vector-stores",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "3f9ba556d7b1d28e3c97b4fa0f1c3781e4b19b7cf1195cc4900f8bb8e9fbda2b",
+      "text_file": "pages/docs__guides__vector-stores.txt",
+      "html_file": "pages/docs__guides__vector-stores.html",
+      "preview_240": "Vector Stores - Developer Guide Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision Sign in Platfor"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/integrations/opencode",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "1c5fca8737f8b679942c232b13e3dc2b274d113446a6df721b6afacccba4d262",
+      "text_file": "pages/docs__integrations__opencode.txt",
+      "html_file": "pages/docs__integrations__opencode.html",
+      "preview_240": "Use OpenCode with SCX.ai Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision Sign in Platform Docs "
+    },
+    {
+      "url": "https://platform.scx.ai/docs/models",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "2b014fc4f412c2ab61b87851799ad840f54e1f3912c11cf6deb48a2411e49419",
+      "text_file": "pages/docs__models.txt",
+      "html_file": "pages/docs__models.html",
+      "preview_240": "Models | SCX.ai Back to platform Overview Models Integrations OpenCode Guides Audio Batches Embeddings Function calling OpenAI compatibility Speech Structured Outputs Text generation Vapi Vector stores Vision Sign in Platform Docs API Refer"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/audio-transcriptions",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "e81f8f9bb77a7e860d65698db5e0fb80cd61dedcaa5a7cdbce3c420048acb193",
+      "text_file": "pages/api-reference__audio-transcriptions.txt",
+      "html_file": "pages/api-reference__audio-transcriptions.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Create transcription Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Sig"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/audio-translations",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "e3765fe131b06a94408ca598f397630fc3b9b84d7eeb5c058008112b0bed1776",
+      "text_file": "pages/api-reference__audio-translations.txt",
+      "html_file": "pages/api-reference__audio-translations.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Create translation Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Sign "
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/audio-voices-create",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "49cea361943232c582d2ae8c9cb490b59062dd8d9528b94059cdb38c23503b8d",
+      "text_file": "pages/api-reference__audio-voices-create.txt",
+      "html_file": "pages/api-reference__audio-voices-create.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Create voice List voices Delete voice Create speech Realtime Models Batches Anthropic Mess"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/audio-voices-delete",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "5a5d0bef41e9b636c8f27f8964e09e096e38e3f97e4681d0b2cba849b1f8c5f5",
+      "text_file": "pages/api-reference__audio-voices-delete.txt",
+      "html_file": "pages/api-reference__audio-voices-delete.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Create voice List voices Delete voice Create speech Realtime Models Batches Anthropic Mess"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/audio-voices-list",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "69afd80db3669a325d97444f82cbda6c691ea0c089b117ba5ae4a444f8e46d6d",
+      "text_file": "pages/api-reference__audio-voices-list.txt",
+      "html_file": "pages/api-reference__audio-voices-list.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Create voice List voices Delete voice Create speech Realtime Models Batches Anthropic Mess"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/batches-cancel",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "cc1303b28e9f1ba29f7e665ebc841eca6696a1002a09622a86bb19f8c528ced0",
+      "text_file": "pages/api-reference__batches-cancel.txt",
+      "html_file": "pages/api-reference__batches-cancel.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Create batch List batches Retrieve batch Cancel batch Anthropic Me"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/batches-create",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "43eaa7449e128f0fae17225747e0315f433cf312e067252dc575fdd75d48ffd0",
+      "text_file": "pages/api-reference__batches-create.txt",
+      "html_file": "pages/api-reference__batches-create.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Create batch List batches Retrieve batch Cancel batch Anthropic Me"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/batches-list",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "6eccd1eb14a23878ac7edf217b51cf7653abeda89ee603762e655601e5496ee9",
+      "text_file": "pages/api-reference__batches-list.txt",
+      "html_file": "pages/api-reference__batches-list.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Create batch List batches Retrieve batch Cancel batch Anthropic Me"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/batches-retrieve",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "ac5181e7873af4b56aaa126df73bd15536b17232bd54e00f0649da6b615a6649",
+      "text_file": "pages/api-reference__batches-retrieve.txt",
+      "html_file": "pages/api-reference__batches-retrieve.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Create batch List batches Retrieve batch Cancel batch Anthropic Me"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/chat-completions",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "b4302a30328370b726c05e4d6cf3851296e46d746e36ee195cc14d9061526bfb",
+      "text_file": "pages/api-reference__chat-completions.txt",
+      "html_file": "pages/api-reference__chat-completions.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Create chat completion Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores S"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/completions",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "5f61ae0fa0f287c19f8593b69c124372ff9164567a1e79397122b09e6baf9d6f",
+      "text_file": "pages/api-reference__completions.txt",
+      "html_file": "pages/api-reference__completions.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Create completion Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Sign i"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/embeddings",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "0a67e468f667663a6ac40b684f65d2e60ff2646191b2e7361895dbe96400e929",
+      "text_file": "pages/api-reference__embeddings.txt",
+      "html_file": "pages/api-reference__embeddings.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Create embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Sign i"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/messages",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "8e539f9c0159935e8ab0bf5b07bf16ac592715d472dc53df01443874c2d6cea5",
+      "text_file": "pages/api-reference__messages.txt",
+      "html_file": "pages/api-reference__messages.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Create message Platform Vector Stores Sign in P"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/models",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "9d1677f1c48f2f467e164d085b144c1c1fbac09d1036ec81edf2ccd38d267471",
+      "text_file": "pages/api-reference__models.txt",
+      "html_file": "pages/api-reference__models.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models List models Batches Anthropic Messages Platform Vector Stores Sign in Plat"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/moderations",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "3c6878be7824b85063c7963276eaa21efb97013a65d1e82ed48338e8f93a1e17",
+      "text_file": "pages/api-reference__moderations.txt",
+      "html_file": "pages/api-reference__moderations.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Create moderation Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Sign i"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/realtime",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "ff074683fd07ebaf272abbf2941e19dcf65d97c506f202c280a79639acbfeba9",
+      "text_file": "pages/api-reference__realtime.txt",
+      "html_file": "pages/api-reference__realtime.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Realtime audio (WebSocket) Models Batches Anthropic Messages Platform Vector Stor"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/responses",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "f262ace640e00c84bffdecb03478e01d2c53ced23acea278be73f0800a5eed9f",
+      "text_file": "pages/api-reference__responses.txt",
+      "html_file": "pages/api-reference__responses.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Create response Retrieve response Delete response Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messag"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/responses-delete",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "60ba96a932fa2ba5f6e83dec1699d87541ae5259a2c4aff13baa7121950fa4e1",
+      "text_file": "pages/api-reference__responses-delete.txt",
+      "html_file": "pages/api-reference__responses-delete.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Create response Retrieve response Delete response Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messag"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/responses-retrieve",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "b2340f9651bf6c110b027fc996f312394837faa601aafda59ab1ec8748a6ae6f",
+      "text_file": "pages/api-reference__responses-retrieve.txt",
+      "html_file": "pages/api-reference__responses-retrieve.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Create response Retrieve response Delete response Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messag"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/speech",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "f94436470abc0993744c911f4723ba6332265a241d767d6a79102e75f2ad8c43",
+      "text_file": "pages/api-reference__speech.txt",
+      "html_file": "pages/api-reference__speech.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Create voice List voices Delete voice Create speech Realtime Models Batches Anthropic Mess"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "b8aae5ebc0f31e6372218015a982d0f165d4a3572041e2383bdea6d88bfefe02",
+      "text_file": "pages/api-reference__vector-stores.txt",
+      "html_file": "pages/api-reference__vector-stores.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-delete",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "108a6a52b98c25912f12cced42d6c8e836e3bfe0e9bda7ee65c353244d101628",
+      "text_file": "pages/api-reference__vector-stores-delete.txt",
+      "html_file": "pages/api-reference__vector-stores-delete.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-files-delete",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "8d551e190c83b2ca975c7fa18945e1b3f6175cfe683bf0c20eaab4caee9cbd61",
+      "text_file": "pages/api-reference__vector-stores-files-delete.txt",
+      "html_file": "pages/api-reference__vector-stores-files-delete.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-files-list",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "e66329f4dfc1df53882c027b0deef7b83cf5f48a2e157be5e2230a7b2656f39a",
+      "text_file": "pages/api-reference__vector-stores-files-list.txt",
+      "html_file": "pages/api-reference__vector-stores-files-list.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-files-upload",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "59bf7ef75db0dc2dad303361da41824b46dd695ed826c766389aadc648281713",
+      "text_file": "pages/api-reference__vector-stores-files-upload.txt",
+      "html_file": "pages/api-reference__vector-stores-files-upload.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-list",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "d61bea8a86515151e0b330760b90d881c556be4b213ced0f995dcc75ca4a8bea",
+      "text_file": "pages/api-reference__vector-stores-list.txt",
+      "html_file": "pages/api-reference__vector-stores-list.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-retrieve",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "b6c3cdb468a122896d9c25a74d1333c2ab6857dd526d66eec418e36c82a2da8e",
+      "text_file": "pages/api-reference__vector-stores-retrieve.txt",
+      "html_file": "pages/api-reference__vector-stores-retrieve.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/api-reference/vector-stores-search",
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "sha256": "6b6de6f65c92a75f13422f45d65303810cdc2e29293b69edd5b2e04d1b7e607a",
+      "text_file": "pages/api-reference__vector-stores-search.txt",
+      "html_file": "pages/api-reference__vector-stores-search.html",
+      "preview_240": "SCX.ai Dashboard Back to platform OpenAI Responses Chat Completions Completions Embeddings Moderations Audio Transcriptions Audio Translations Speech Realtime Models Batches Anthropic Messages Platform Vector Stores Create vector store List"
+    },
+    {
+      "url": "https://platform.scx.ai/docs/guides/%DOCS_URL%25/docs/api-reference/embeddings/create-embeddings",
+      "status": 400,
+      "contentType": "text/html",
+      "sha256": "efca0895b4d88b27a94249f8e7ac0083eff0a4ff3ac37c2841b3f6d7e11c1905",
+      "text_file": "pages/docs__guides__-DOCS_URL-25__docs__api-reference__embeddings__create-embeddings.txt",
+      "html_file": "pages/docs__guides__-DOCS_URL-25__docs__api-reference__embeddings__create-embeddings.html",
+      "preview_240": "400 Bad Request 400 Bad Request cloudflare"
+    }
+  ]
+}

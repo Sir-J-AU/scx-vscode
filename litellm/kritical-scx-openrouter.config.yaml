@@ -1,0 +1,267 @@
+# ============================================================
+# Kritical LiteLLM proxy — SCX + OpenRouter + Free Provider Tier
+# ------------------------------------------------------------
+# ADDITIVE extension of kritical-scx.config.yaml.
+# Adds OpenRouter/free as a first-class routing source alongside SCX.
+# The operator picks which provider serves via model name.
+#
+# NEW env vars (HKCU convention):
+#   OPENROUTER_API_KEY    (enables OpenRouter /free and paid slots)
+#   GROQ_API_KEY          (enables Groq free tier)
+#   TOGETHER_API_KEY      (enables Together AI free tier)
+#   FIREWORKS_API_KEY     (enables Fireworks AI free tier)
+#   GOOGLE_API_KEY        (enables Google AI Studio Gemini)
+#   DEEPSEEK_API_KEY      (enables DeepSeek API)
+#   COHERE_API_KEY        (enables Cohere free tier)
+#   MISTRAL_API_KEY       (enables Mistral free tier; operator-verified 2B tokens/day)
+#
+# Per HR29: this proxy is ADDITIVE. Turn it off and every downstream
+# agent falls back to direct-API calls. Zero rewrite. Zero surprise.
+#
+# Author: Joshua Finley — (c) 2026 Kritical Pty Ltd
+# Contact: sales@kritical.net · ph. 1300 274 655
+# ============================================================
+
+model_list:
+  # ==========================================================
+  # OPENROUTER /FREE — random free model selection
+  # ==========================================================
+  # The smartest free inference available. OpenRouter selects free
+  # models at random, filtering for features your request needs
+  # (vision, tools, JSON, reasoning). No credit card required.
+  - model_name: openrouter-free
+    litellm_params:
+      model: openrouter/openrouter/free
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      mode: chat
+      description: "Random free model from OpenRouter pool (gpt-oss-120b, Nemotron, Llama 3.3, Qwen3, Gemma 4, etc)"
+
+  # Specific OpenRouter free models (for when you want certainty)
+  - model_name: openrouter-gpt-oss-120b
+    litellm_params:
+      model: openrouter/openai/gpt-oss-120b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: openrouter-nemotron-super
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: openrouter-llama-3.3-70b
+    litellm_params:
+      model: openrouter/meta-llama/llama-3.3-70b-instruct:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: openrouter-qwen3-coder
+    litellm_params:
+      model: openrouter/qwen/qwen3-coder:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: openrouter-gemma-4
+    litellm_params:
+      model: openrouter/google/gemma-4-31b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  # ==========================================================
+  # SCX NATIVE — primary paid tier (unlimited RPM/TPM)
+  # ==========================================================
+  - model_name: minimax-m2.7
+    litellm_params:
+      model: openai/MiniMax-M2.7
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: scx-coder
+    litellm_params:
+      model: openai/coder
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: openai/gpt-oss-120b
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: deepseek-v3.1
+    litellm_params:
+      model: openai/DeepSeek-V3.1
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: magpie
+    litellm_params:
+      model: openai/MAGPiE
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: llama-4-maverick
+    litellm_params:
+      model: openai/Llama-4-Maverick-17B-128E-Instruct
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: llama-3.3-70b
+    litellm_params:
+      model: openai/Meta-Llama-3.3-70B-Instruct
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: qwen3-32b
+    litellm_params:
+      model: openai/Qwen3-32B
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  - model_name: gemma-4
+    litellm_params:
+      model: openai/gemma-4-31B-it
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+
+  # -------- Anthropic-shape aliases -------------------------
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: openai/MiniMax-M2.7
+      api_base: https://api.scx.ai/v1
+      api_key: os.environ/SCX_API_KEY
+      mock_response: false
+
+  # ==========================================================
+  # FREE PROVIDER PASSTHROUGH — Groq, Together, Fireworks, etc
+  # ==========================================================
+  # Only active when the respective API key is set in HKCU.
+  # Absent = row silently unroutable (LiteLLM returns 404).
+  #
+  # Groq — blazing fast LPU inference
+  - model_name: groq-llama-3.3-70b
+    litellm_params:
+      model: groq/llama-3.3-70b-versatile
+      api_key: os.environ/GROQ_API_KEY
+
+  - model_name: groq-gemma-2-9b
+    litellm_params:
+      model: groq/gemma2-9b-it
+      api_key: os.environ/GROQ_API_KEY
+
+  # Together AI — research-optimized inference
+  - model_name: together-llama-3.3-70b
+    litellm_params:
+      model: together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo
+      api_key: os.environ/TOGETHER_API_KEY
+
+  # Google AI Studio — Gemini (very generous free tier)
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GOOGLE_API_KEY
+
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # DeepSeek — open weights, extremely cheap
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  - model_name: deepseek-reasoner
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+  # Fireworks AI — 400+ models
+  - model_name: fireworks-llama-3.3-70b
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/llama-v3p3-70b-instruct
+      api_key: os.environ/FIREWORKS_API_KEY
+
+  # Cohere — Command R series
+  - model_name: cohere-command-r
+    litellm_params:
+      model: cohere/command-r
+      api_key: os.environ/COHERE_API_KEY
+
+  # Mistral — Codestral for code (operator-verified 2B tokens/day)
+  - model_name: mistral-codestral
+    litellm_params:
+      model: mistral/codestral-latest
+      api_key: os.environ/MISTRAL_API_KEY
+
+  # ==========================================================
+  # LOCAL INFERENCE — Ollama, LM Studio
+  # ==========================================================
+  - model_name: ollama-default
+    litellm_params:
+      model: ollama/llama3.3
+      api_base: http://localhost:11434
+
+  - model_name: lmstudio-default
+    litellm_params:
+      model: openai/local-model
+      api_base: http://localhost:1234/v1
+      api_key: dummy-key
+
+  # ==========================================================
+  # GENERIC OPENAI-COMPATIBLE SLOT (legacy catch-all)
+  # ==========================================================
+  - model_name: generic/default
+    litellm_params:
+      model: openai/${GENERIC_MODEL_NAME}
+      api_base: os.environ/GENERIC_API_BASE
+      api_key: os.environ/GENERIC_API_KEY
+
+# -----------------------------------------------------------
+# Router-level fallback chain — free → SCX → paid
+# -----------------------------------------------------------
+router_settings:
+  routing_strategy: simple-shuffle
+  fallbacks:
+    # Free-first fallback: try OpenRouter free, then SCX, then other free tiers
+    - openrouter-free:      [mistral-codestral, openrouter-gpt-oss-120b, openrouter-llama-3.3-70b, minimax-m2.7]
+    - openrouter-gpt-oss-120b: [openrouter-nemotron-super, gpt-oss-120b]
+    - openrouter-llama-3.3-70b: [llama-3.3-70b, groq-llama-3.3-70b]
+    - groq-llama-3.3-70b:   [together-llama-3.3-70b, llama-3.3-70b]
+    - gemini-2.5-flash:     [openrouter-free, gemini-2.5-pro]
+    - deepseek-chat:        [deepseek-reasoner, openrouter-free]
+    - minimax-m2.7:         [scx-coder, openrouter-free, gpt-oss-120b]
+    - scx-coder:            [minimax-m2.7, openrouter-free]
+    - gpt-oss-120b:         [openrouter-gpt-oss-120b, minimax-m2.7]
+    - deepseek-v3.1:        [deepseek-chat, openrouter-free]
+    - magpie:               [minimax-m2.7, openrouter-free]
+    - llama-4-maverick:     [minimax-m2.7, openrouter-free]
+    - claude-sonnet-4-6:    [scx-coder, openrouter-free]
+
+  num_retries: 2
+  timeout: 120
+  retry_after: 3
+  allowed_fails: 2
+  cooldown_time: 30
+
+# -----------------------------------------------------------
+# General settings
+# -----------------------------------------------------------
+general_settings:
+  master_key: sk-kritical-scx-local
+  drop_params: true
+  disable_spend_logs: false
+  disable_error_logs: false
+
+# -----------------------------------------------------------
+# Litellm settings
+# -----------------------------------------------------------
+litellm_settings:
+  set_verbose: false
+  json_logs: true
+  turn_off_message_logging: false
+  callbacks: ["kritical_scx_logger.kritical_logger"]
+  fallbacks: null
+  context_window_fallbacks: null
+
+# -----------------------------------------------------------
+# Run via:
+#   litellm --config kritical-scx-openrouter.config.yaml --host 127.0.0.1 --port 4180
+# -----------------------------------------------------------

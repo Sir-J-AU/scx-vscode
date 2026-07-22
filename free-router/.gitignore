@@ -1,0 +1,20 @@
+# Kritical Free Router — prevent accidental commits of secrets
+*.key
+*.secret
+.env
+.env.local
+*.pem
+*.p12
+*.pfx
+# Logs
+*.log
+*.log.err
+# PID files
+*.pid
+# Archives
+*_ARCHIVED_*
+# Python cache
+__pycache__/
+*.pyc
+# Node
+node_modules/

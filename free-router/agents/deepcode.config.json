@@ -1,0 +1,43 @@
+{
+  "$comment": "DeepCode (DeepSeek-focused) configuration for Kritical Free Router",
+  "model": "deepseek/deepseek-chat",
+  "apiUrl": "http://127.0.0.1:4182",
+  "apiKey": "sk-kritical-free-local",
+  "headers": {
+    "HTTP-Referer": "https://kritical.net",
+    "X-Title": "Kritical DeepCode"
+  },
+  "maxTokens": 8192,
+  "temperature": 0.6,
+  "features": {
+    "tools": true,
+    "reasoning": true,
+    "streaming": true,
+    "json_mode": true
+  },
+  "deepseek_specific": {
+    "enable_reasoning": true,
+    "reasoning_effort": "medium",
+    "preserve_reasoning_details": true
+  },
+  "fallbacks": [
+    {
+      "model": "deepseek/deepseek-reasoner",
+      "apiUrl": "http://127.0.0.1:4182"
+    },
+    {
+      "model": "openrouter/free",
+      "apiUrl": "http://127.0.0.1:4182"
+    },
+    {
+      "model": "gemini/gemini-2.5-pro",
+      "apiUrl": "http://127.0.0.1:4182"
+    }
+  ],
+  "coding_preferences": {
+    "language": "auto-detect",
+    "style": "concise",
+    "include_tests": true,
+    "explain_complex_logic": true
+  }
+}

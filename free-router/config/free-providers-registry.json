@@ -1,0 +1,296 @@
+{
+  "$schema": "https://kritical.net/schemas/free-providers-registry/v1",
+  "$comment": "Kritical Free AI Provider Registry — ordered by daily free tokens (most generous first). All entries verified as of 2026-07-07 unless source='operator_verified'. Update via PR; never commit real keys.",
+  "meta": {
+    "version": "1.0.0",
+    "updated": "2026-07-07T00:00:00Z",
+    "author": "Joshua Finley",
+    "company": "Kritical Pty Ltd",
+    "contact": "sales@kritical.net"
+  },
+  "providers": [
+    {
+      "id": "openrouter-free",
+      "name": "OpenRouter /free Router",
+      "category": "aggregator",
+      "home": "https://openrouter.ai",
+      "docs": "https://openrouter.ai/docs",
+      "free_tier": {
+        "type": "unlimited_rate_limited",
+        "daily_tokens_in": null,
+        "daily_tokens_out": null,
+        "rpm_limit": 20,
+        "tpm_limit": null,
+        "notes": "Random free model selection. No key required for /free endpoint but signup gets higher limits. Smart feature filtering (vision, tools, JSON, reasoning). Top free models: gpt-oss-120b, gpt-oss-20b, Nemotron 3 series, Llama 3.3 70B, Qwen3 Coder 480B, Gemma 4 series."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://openrouter.ai/api/v1",
+        "auth": "Bearer $OPENROUTER_API_KEY",
+        "key_env": "OPENROUTER_API_KEY",
+        "model_slug": "openrouter/free"
+      },
+      "features": ["tools", "vision", "json_mode", "reasoning", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider", "cline", "kimi-code"],
+      "reliability": "high",
+      "latency": "variable",
+      "rank": 1
+    },
+    {
+      "id": "mistral-free",
+      "name": "Mistral AI Free Tier",
+      "category": "foundation",
+      "home": "https://mistral.ai",
+      "docs": "https://docs.mistral.ai",
+      "free_tier": {
+        "type": "credits",
+        "daily_tokens_in": 2000000000,
+        "daily_tokens_out": 2000000000,
+        "rpm_limit": null,
+        "tpm_limit": null,
+        "source": "operator_verified",
+        "verified_by": "Joshua Finley / Kritical",
+        "verified_utc": "2026-07-07T00:00:00Z",
+        "notes": "Corrected from the bad 500K/day placeholder. Operator-verified free tier is 2B tokens/day. Codestral is the preferred coding route when the key is present."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://api.mistral.ai/v1",
+        "auth": "Bearer $MISTRAL_API_KEY",
+        "key_env": "MISTRAL_API_KEY",
+        "model_slug": "codestral-latest"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider", "cline", "deepcode"],
+      "reliability": "high",
+      "latency": "good",
+      "rank": 2
+    },
+    {
+      "id": "together-free",
+      "name": "Together AI Free Tier",
+      "category": "inference",
+      "home": "https://www.together.ai",
+      "docs": "https://docs.together.ai",
+      "free_tier": {
+        "type": "credits",
+        "daily_tokens_in": 1000000,
+        "daily_tokens_out": 1000000,
+        "rpm_limit": 60,
+        "tpm_limit": null,
+        "notes": "~1M tokens/day free. Serverless inference. Models: Llama 3, Qwen, DeepSeek, Mistral, Nous Hermes."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://api.together.xyz/v1",
+        "auth": "Bearer $TOGETHER_API_KEY",
+        "key_env": "TOGETHER_API_KEY",
+        "model_slug": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider"],
+      "reliability": "high",
+      "latency": "good",
+      "rank": 3
+    },
+    {
+      "id": "fireworks-free",
+      "name": "Fireworks AI Free Tier",
+      "category": "inference",
+      "home": "https://fireworks.ai",
+      "docs": "https://docs.fireworks.ai",
+      "free_tier": {
+        "type": "credits",
+        "daily_tokens_in": 500000,
+        "daily_tokens_out": 500000,
+        "rpm_limit": 60,
+        "tpm_limit": null,
+        "notes": "~500K tokens/day free. 400+ models. Serverless. Models: Llama, Mixtral, Qwen, DBRX."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "auth": "Bearer $FIREWORKS_API_KEY",
+        "key_env": "FIREWORKS_API_KEY",
+        "model_slug": "accounts/fireworks/models/llama-v3p3-70b-instruct"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev"],
+      "reliability": "high",
+      "latency": "good",
+      "rank": 4
+    },
+    {
+      "id": "groq-free",
+      "name": "Groq Cloud Free Tier",
+      "category": "inference",
+      "home": "https://groq.com",
+      "docs": "https://console.groq.com/docs",
+      "free_tier": {
+        "type": "credits",
+        "daily_tokens_in": 500000,
+        "daily_tokens_out": 500000,
+        "rpm_limit": 30,
+        "tpm_limit": 6000,
+        "notes": "Free tier: ~500K tokens/day. LPU inference = 1,000+ tokens/sec. Models: Llama 3.3 70B, Mixtral 8x7B, Gemma 2, etc."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://api.groq.com/openai/v1",
+        "auth": "Bearer $GROQ_API_KEY",
+        "key_env": "GROQ_API_KEY",
+        "model_slug": "llama-3.3-70b-versatile"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider"],
+      "reliability": "high",
+      "latency": "excellent",
+      "rank": 5
+    },
+    {
+      "id": "google-ai-studio",
+      "name": "Google AI Studio (Gemini)",
+      "category": "foundation",
+      "home": "https://aistudio.google.com",
+      "docs": "https://ai.google.dev/gemini-api/docs",
+      "free_tier": {
+        "type": "unlimited_rate_limited",
+        "daily_tokens_in": null,
+        "daily_tokens_out": null,
+        "rpm_limit": 15,
+        "tpm_limit": 1000000,
+        "notes": "Gemini 2.5 Pro/Flash free tier: 15 RPM, 1M TPM. Very generous for prototyping. Vision + function calling supported."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "auth": "Bearer $GOOGLE_API_KEY",
+        "key_env": "GOOGLE_API_KEY",
+        "model_slug": "gemini-2.5-flash"
+      },
+      "features": ["tools", "vision", "json_mode", "streaming", "grounding"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider", "kimi-code"],
+      "reliability": "high",
+      "latency": "good",
+      "rank": 6
+    },
+    {
+      "id": "deepseek-open",
+      "name": "DeepSeek Open API",
+      "category": "foundation",
+      "home": "https://platform.deepseek.com",
+      "docs": "https://platform.deepseek.com/api-docs",
+      "free_tier": {
+        "type": "credits",
+        "daily_tokens_in": 500000,
+        "daily_tokens_out": 500000,
+        "rpm_limit": null,
+        "tpm_limit": null,
+        "notes": "DeepSeek-V3 and DeepSeek-R1 at extremely low cost. Occasional free credits for new signups. ~500K tokens/day on free tier when available."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://api.deepseek.com/v1",
+        "auth": "Bearer $DEEPSEEK_API_KEY",
+        "key_env": "DEEPSEEK_API_KEY",
+        "model_slug": "deepseek-chat"
+      },
+      "features": ["tools", "reasoning", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider", "deepcode"],
+      "reliability": "high",
+      "latency": "moderate",
+      "rank": 7
+    },
+    {
+      "id": "cohere-free",
+      "name": "Cohere Free Tier",
+      "category": "foundation",
+      "home": "https://cohere.com",
+      "docs": "https://docs.cohere.com",
+      "free_tier": {
+        "type": "credits",
+        "daily_tokens_in": 1000000,
+        "daily_tokens_out": 1000000,
+        "rpm_limit": 100,
+        "tpm_limit": null,
+        "notes": "~1M tokens/month free (not daily). Command R, Command R+ models. Good for RAG/coding."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "https://api.cohere.com/v1",
+        "auth": "Bearer $COHERE_API_KEY",
+        "key_env": "COHERE_API_KEY",
+        "model_slug": "command-r"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["continue-dev", "aider"],
+      "reliability": "high",
+      "latency": "good",
+      "rank": 8
+    },
+    {
+      "id": "ollama-local",
+      "name": "Ollama (Local)",
+      "category": "local",
+      "home": "https://ollama.com",
+      "docs": "https://github.com/ollama/ollama/blob/main/docs/api.md",
+      "free_tier": {
+        "type": "truly_free",
+        "daily_tokens_in": null,
+        "daily_tokens_out": null,
+        "rpm_limit": null,
+        "tpm_limit": null,
+        "notes": "100% free, local inference. No API key. Speed depends on your GPU. Models: Llama 3, Qwen, Mistral, CodeLlama, DeepSeek-Coder."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "http://localhost:11434/v1",
+        "auth": "dummy",
+        "key_env": "OLLAMA_DUMMY_KEY",
+        "model_slug": "llama3.3"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider", "kimi-code", "deepcode"],
+      "reliability": "depends_on_hardware",
+      "latency": "depends_on_hardware",
+      "rank": 9
+    },
+    {
+      "id": "lmstudio-local",
+      "name": "LM Studio (Local)",
+      "category": "local",
+      "home": "https://lmstudio.ai",
+      "docs": "https://lmstudio.ai/docs",
+      "free_tier": {
+        "type": "truly_free",
+        "daily_tokens_in": null,
+        "daily_tokens_out": null,
+        "rpm_limit": null,
+        "tpm_limit": null,
+        "notes": "Local inference GUI. OpenAI-compatible local server. No API key needed."
+      },
+      "api": {
+        "shape": "openai",
+        "base_url": "http://localhost:1234/v1",
+        "auth": "dummy",
+        "key_env": "LMSTUDIO_DUMMY_KEY",
+        "model_slug": "local-model"
+      },
+      "features": ["tools", "json_mode", "streaming"],
+      "coding_tools": ["claude-code", "codex-cli", "continue-dev", "aider"],
+      "reliability": "depends_on_hardware",
+      "latency": "depends_on_hardware",
+      "rank": 10
+    }
+  ],
+  "routing": {
+    "default_free_priority": ["openrouter-free", "mistral-free", "google-ai-studio", "together-free", "groq-free", "deepseek-open", "fireworks-free"],
+    "fallback_chain": {
+      "coding": ["openrouter-free", "mistral-free", "together-free", "groq-free", "deepseek-open", "google-ai-studio"],
+      "reasoning": ["openrouter-free", "deepseek-open", "google-ai-studio", "together-free"],
+      "vision": ["openrouter-free", "google-ai-studio", "together-free"],
+      "fast": ["groq-free", "openrouter-free", "together-free"]
+    },
+    "notes": "OpenRouter/free is rank 1 because it has unlimited access to a rotating pool of frontier models. Mistral is rank 2 after the operator-verified 2B tokens/day correction. Google AI Studio remains the preferred vision + grounding free provider."
+  }
+}

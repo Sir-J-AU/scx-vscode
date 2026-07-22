@@ -145,7 +145,7 @@ report = {
 }
 cn = pyodbc.connect(CONN, timeout=15); cur = cn.cursor()
 txt = json.dumps(report)
-h = sha("emit-all|" + txt + str(len(results)) + str(passed))
+h = sha(txt)
 if cur.execute("SELECT COUNT(*) FROM dbo.decision_log WHERE content_sha256=?", h).fetchone()[0] == 0:
     cur.execute("INSERT dbo.decision_log(ts_utc,side,category,wave,session_id,content_sha256,simhash,content_len,content_gz,preview_120,model,provider,source,meta) "
                 "VALUES(SYSUTCDATETIME(),'ai','test-emit-receipt','.5215','emit-all',?,0,?,COMPRESS(CAST(? AS NVARCHAR(MAX))),?,'deepseek-v3.1','scx','emit-all',?)",

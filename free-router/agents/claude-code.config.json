@@ -1,0 +1,31 @@
+{
+  "$comment": "Claude Code configuration for Kritical Free Router (OpenRouter + free providers)",
+  "model": "openrouter/free",
+  "apiUrl": "http://127.0.0.1:4182",
+  "apiKey": "sk-kritical-free-local",
+  "headers": {
+    "HTTP-Referer": "https://kritical.net",
+    "X-Title": "Kritical Claude Code"
+  },
+  "maxTokens": 8192,
+  "temperature": 0.7,
+  "features": {
+    "tools": true,
+    "vision": true,
+    "streaming": true
+  },
+  "fallbacks": [
+    {
+      "model": "openrouter/nvidia/nemotron-3-super",
+      "apiUrl": "http://127.0.0.1:4182"
+    },
+    {
+      "model": "groq/llama-3.3-70b-versatile",
+      "apiUrl": "http://127.0.0.1:4182"
+    },
+    {
+      "model": "gemini/gemini-2.5-flash",
+      "apiUrl": "http://127.0.0.1:4182"
+    }
+  ]
+}

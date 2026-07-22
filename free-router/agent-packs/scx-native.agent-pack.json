@@ -1,0 +1,75 @@
+{
+  "$schema": "https://kritical.net/schemas/agent-pack/v1",
+  "id": "scx-native",
+  "name": "SCX.ai Native Agent Pack",
+  "version": "1.0.0",
+  "updated_utc": "2026-07-07T00:00:00Z",
+  "author": "Joshua Finley",
+  "company": "Kritical Pty Ltd",
+  "copyright": "(c) 2026 Kritical Pty Ltd. All rights reserved.",
+  "purpose": "Route coding agents directly to SCX.ai using SCX_API_KEY and the SCX OpenAI-compatible API.",
+  "router": {
+    "name": "SCX Native",
+    "base_url": "https://api.scx.ai/v1",
+    "models_url": "https://api.scx.ai/v1/models",
+    "api_key_env": "SCX_API_KEY",
+    "shim_url": "http://127.0.0.1:4199/v1",
+    "shim_start_command": "pwsh codex-wrapper/Start-KritScxMcpServer.ps1 -Mode Status"
+  },
+  "models": {
+    "default": "MiniMax-M2.7",
+    "coding": "coder",
+    "reasoning": "MAGPiE",
+    "cheap_reasoning": "gpt-oss-120b",
+    "hard_debug": "DeepSeek-V3.1",
+    "multilingual": "Qwen3-32B",
+    "embedding": "E5-Mistral-7B-Instruct",
+    "speech": "Whisper-Large-V3"
+  },
+  "tools": {
+    "claude": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.scx.ai/v1",
+      "api_key_env": "SCX_API_KEY",
+      "model": "MiniMax-M2.7"
+    },
+    "codex": {
+      "kind": "responses-openai-compatible",
+      "base_url": "http://127.0.0.1:4199/v1",
+      "api_key_env": "SCX_API_KEY",
+      "model": "coder",
+      "notes": "Uses the Kritical SCX agentic shim for Responses tool-shape normalization."
+    },
+    "continue": {
+      "kind": "continue.dev",
+      "provider": "openai",
+      "apiBase": "https://api.scx.ai/v1",
+      "apiKeyEnv": "SCX_API_KEY",
+      "model": "coder"
+    },
+    "aider": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.scx.ai/v1",
+      "api_key_env": "SCX_API_KEY",
+      "model": "openai/coder"
+    },
+    "cline": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.scx.ai/v1",
+      "api_key_env": "SCX_API_KEY",
+      "model": "coder"
+    },
+    "deepcode": {
+      "kind": "openai-compatible",
+      "base_url": "https://api.scx.ai/v1",
+      "api_key_env": "SCX_API_KEY",
+      "model": "DeepSeek-V3.1",
+      "vscode_settings": {
+        "deepcode.apiBase": "https://api.scx.ai/v1",
+        "deepcode.apiKeyEnv": "SCX_API_KEY",
+        "deepcode.model": "DeepSeek-V3.1"
+      }
+    }
+  },
+  "kill_switch": "Unset SCX_API_KEY or remove this pack's generated tool config; native tools keep their own config."
+}

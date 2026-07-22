@@ -1,173 +1,131 @@
-# Kritical.SCXCode — architecture
+# Kritical.SCXCode Architecture
 
-## The three paths, side by side
+Kritical.SCXCode is the additive SCX-in-coding-agents stack for Kritical Lens. Every layer is optional: if a router, shim, store, MCP server, VS Code extension, or supervisor is stopped, the underlying agent must still be able to run through its native path.
 
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│                          VS Code                                       │
-│                                                                       │
-│  ┌───────────────────┐  ┌───────────────────┐  ┌──────────────────┐   │
-│  │  Path A           │  │  Path B           │  │  Path C          │   │
-│  │  Continue.dev     │  │  Cline / RooCode  │  │  Kritical SCX    │   │
-│  │  (works TODAY)    │  │  (works TODAY)    │  │  (scaffold only) │   │
-│  └────────┬──────────┘  └────────┬──────────┘  └────────┬─────────┘   │
-│           │                       │                       │            │
-│           └───────────────┬───────┴───────────────┬──────┘            │
-│                           │                       │                    │
-│                           ▼                       ▼                    │
-│                   config.json          Extension settings              │
-│                     with SCX apiBase   with anthropic-compat provider  │
-│                     and env-substituted apiKey                         │
-└───────────────────────────┬───────────────────────┬───────────────────┘
-                            │                       │
-                            └────────┬──────────────┘
-                                     │  ANTHROPIC-SHAPE POST
-                                     │  x-api-key: {{env.SCX_API_KEY}}
-                                     │  anthropic-version: 2023-06-01
-                                     │
-                                     ▼
-                        ┌──────────────────────────┐
-                        │  https://api.scx.ai      │
-                        │  /v1/messages            │
-                        │  /v1/chat/completions    │
-                        │  /v1/embeddings          │
-                        │  /v1/models              │
-                        └──────────────────────────┘
+## Runtime Map
 
-     Key source (Kritical env-var convention, never in git):
-
-     C:\Users\joshl\OneDrive - Kritical Pty Ltd\
-       Github-SecretsOutsideOfGitRepos\
-         scx-benApiKey-MMDDYYYY-vNNN.txt      <-- MMDDYYYY sorted DESC picks newest
-                          │
-                          ▼
-        Install-KritScxVsCode.ps1 -Mode Install
-                          │
-                          ▼
-    HKCU env vars (persist across sessions, per-user, no admin needed):
-      SCX_API_KEY               = <39 char sk-scx-...>
-      ANTHROPIC_BASE_URL        = https://api.scx.ai
-      KRIT_SCX_MODEL_DEFAULT    = MiniMax-M2.7
-      KRIT_SCX_FALLBACK_CHAIN   = MiniMax-M2.7,MAGPiE,gpt-oss-120b (Path C only)
+```text
+Operator tools
+  Claude Code | Codex CLI | Continue | Aider | Cline | DeepCode | VS Code
+      |
+      | OpenAI-compatible / Anthropic-compatible HTTP
+      v
+Local additive routing
+  127.0.0.1:4180  LiteLLM SCX-native / hybrid router
+  127.0.0.1:4182  LiteLLM free-first router
+  127.0.0.1:4199  SCX Codex Responses shim
+  127.0.0.1:4270  Chunk-store HTTP server
+      |
+      v
+Provider and store backends
+  SCX API | OpenRouter/free | Mistral | Google | Groq | Together | DeepSeek | Fireworks | Cohere
+  SQLite | SQL Express / MSSQL | append-only JSONL decision logs
 ```
 
-## Path A (Continue.dev) — deep-dive
+## Deployment Paths
 
-**Why chosen as default**: Continue is Apache 2.0, has 100k+ VSIX installs,
-supports Anthropic-compatible endpoints via `provider: anthropic` +
-`apiBase: https://api.scx.ai`, has the mature chat panel + inline complete +
-model picker Kritical wants without new engineering.
+| Path | Surface | Location | Current state |
+|---|---|---|---|
+| A | Continue.dev drop-in | `config-templates/`, `free-router/agents/`, agent packs | Shipped config templates and pack manifests |
+| B | OpenAI-compatible agent pack overlays | `free-router/agent-packs/`, `free-router/scripts/Install-KritAgentPack.ps1` | Shipped additive free-router and SCX-native packs |
+| C | `kritical.scxcode` VS Code extension | `src/` | Built and packaged through VSIX v0.1.27 |
+| D | `Kritical.PS.SCXCode` PowerShell module and scripts | `ps-module/`, `install/`, `free-router/scripts/` | Shipped management, setup, key, store, and proof scripts |
+| E | `kritical-scxcode` MCP server | `mcp-server/server.mjs` | Shipped stdio JSON-RPC MCP server |
+| F | Codex Responses shim and branded Codex wrapper | `codex-wrapper/` | Shipped localhost shim, corpus augment, and pack build scripts |
+| G | Supervisor and mux lanes | `mux/` | Shipped SCX mux matrix plus mixed free-router/SCX supervisor |
+| H | Local stores | `store-mcp/`, `sql/` | Shipped SQLite, chunk store, Python MSSQL MCP, and schema initializers |
 
-**How env-var substitution works**: Continue's config parser interprets
-`{{env.SCX_API_KEY}}` in `apiKey` fields and resolves at request time from
-the HKCU env of the VS Code process. So Continue reads the key EVERY
-request — key rotation is instant (no VS Code restart) as long as the new
-value is in HKCU.
+## Routers
 
-**Autocompact**: Continue calls this "compaction". Default ON. When the
-conversation nears model context length, Continue summarizes older turns and
-replaces them with the summary. Per-conversation override via `/compact off`
-or `/compact aggressive` in chat.
+`litellm/kritical-scx.config.yaml` is the SCX-native config for port `4180`. It uses `SCX_API_KEY` and does not overwrite operator `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL`.
 
-**Fallback**: Continue does NOT ship auto-failover across models. Behavior on
-SCX 429: request fails, chat panel shows error. Workaround: click a different
-model in the picker (bottom of chat panel). Path C is where auto-failover lives.
+`litellm/kritical-scx-openrouter.config.yaml` is the hybrid SCX plus OpenRouter/free provider config for port `4180`.
 
-**Chat window features Continue provides for free**:
-- Multi-turn history w/ compaction
-- Model picker (bottom bar dropdown)
-- File `@`-references for context
-- Inline complete (Cmd/Ctrl+I) using `tabAutocompleteModel`
-- Custom slash commands (Kritical config seeds `/explain`, `/krit-refactor`,
-  `/audit-my-change`)
-- Codebase indexing via embeddings model
-- Terminal / diff review integrations
+`litellm/kritical-scx-free.config.yaml` and `free-router/litellm/kritical-scx-free.config.yaml` are the free-first configs for port `4182`. The corrected provider order is OpenRouter/free, Mistral, Google/Gemini, Together, Groq, DeepSeek, Fireworks, Cohere, then optional SCX fallback.
 
-## Path B (Cline / Roo Code) — deep-dive
+All local listeners are localhost-only by design.
 
-**Why offered**: Cline exposes chat as a first-class VS Code side panel with
-file editing, tool use, and terminal execution — closer to the Claude Code
-experience than Continue's chat panel. Roo Code is a fork with more provider
-settings + better SCX fit.
+## Agent Packs
 
-**Provider settings**: Both use "OpenAI Compatible" provider mode. Point at
-`https://api.scx.ai/v1` + set model name from SCX catalog.
+The free-router pack is `free-router/agent-packs/kritical-free-router.agent-pack.json`. It targets `http://127.0.0.1:4182/v1` and exposes free logical models such as `free-default`, `free-coding`, and `free-reasoning`.
 
-**Autocompact**: Cline has its own context management — "auto-condense" —
-similar to Continue's compaction. Toggleable in extension settings.
+The SCX-native pack is `free-router/agent-packs/scx-native.agent-pack.json`. It targets `https://api.scx.ai/v1` for native OpenAI-compatible clients and `http://127.0.0.1:4199/v1` where the Codex Responses shim is required.
 
-**Model selection**: Both extensions have a model dropdown in the side panel.
-Kritical config seeds the same 8 SCX models.
+`free-router/scripts/Install-KritAgentPack.ps1` installs these manifests into `%LOCALAPPDATA%\Kritical\SCXCode\agent-packs` and can persist HKCU env vars without modifying upstream agent installs.
 
-**Path B installer status** (2026-07-03): docs-only. The Install-KritScxVsCode.ps1
-script currently only implements the Continue path fully. Cline + RooCode paths
-land in Path C when the settings-file location on Windows is confirmed.
+## Codex Shim
 
-## Path C (Kritical SCX standalone extension) — future scaffold
+`codex-wrapper/scx-agentic-shim.mjs` bridges Codex-style Responses calls to SCX. It strips unsupported OpenAI parameters, maps tokens and model names, retries transient SCX errors, emits telemetry, and can augment context from the corpus store. It binds to `127.0.0.1:4199` and uses `SCX_API_KEY`.
 
-**Why exists**: Path A/B are 95% of what Kritical wants but don't do:
-- Kritical branding (logo #13365C + accent #15AFD1 cyan, per HR13)
-- Auto-failover chain (SCX → SCX-other-model → Claude Code → Codex → OpenRouter)
-- Multiple SCX keys for load-balance (ben + huzaifa)
-- Env-controlled autocompact toggles matching wave supervisor
-  (`NODE_SUP_SKIP_RADAR` / `NODE_SUP_SKIP_TOOLKIT_PREAMBLE` parity)
-- Hide models that don't accept the current key tier
-- Local telemetry log for cost-per-day per model per user
+`codex-wrapper/kritical-codex.ps1` prefers a compiled branded Codex binary when available, then falls back to the operator's normal `codex` executable.
 
-**Reuse plan** — reuse as much of the existing open-source ecosystem as sensible:
-- Fork Continue's `core/llm/providers` layer (Apache 2.0 — attribution retained)
-- Fork Continue's chat panel React tree
-- Add Kritical brand wrapper (StatusBarItem, chat panel header logo)
-- Add fallback middleware in the provider dispatch
-- Package as `kritical.scxcode` on OpenVSX (avoids Microsoft marketplace
-  attribution paperwork initially)
+## VS Code Extension
 
-**Not yet built**. `src/` is empty. Continue-based Path A is the actionable
-recommendation until Path C ships.
+`src/package.json` and `src/extension.ts` implement the `kritical.scxcode` extension. The extension provides SCX chat, model cache, setup GUI, MCP summaries, Looking Glass store views, auto-context controls, and SCX Codex terminal launch.
 
-## Kritical env-var convention (single source of truth)
+Build command:
 
-Per `KRTPax8ToShopifyConnector/CLAUDE.md` §SECRETS DIRECTORY. Rules:
-
-1. **Never commit secrets**. Files live at
-   `Github-SecretsOutsideOfGitRepos/` (outside every git repo).
-2. **Filename convention** `<service>-<purpose>-MMDDYYYY-vNNN.txt`. Sort descending
-   by name → newest wins.
-3. **HKCU env** is the runtime source. Files are the reload source (installer copies
-   file → HKCU).
-4. **HKLM env** is NEVER used. Per-user only.
-5. **Rotation**: drop a new `scx-benApiKey-<newdate>-vNNN.txt`, re-run
-   `Install-KritScxVsCode.ps1 -Mode Heal`. HKCU picks up the newer file. Path A
-   Continue reads HKCU per-request so rotation propagates instantly.
-
-## Test recipes
-
-### Verify SCX key + endpoint alive
-
-```bash
-curl -sf https://api.scx.ai/v1/models -H "x-api-key: $SCX_API_KEY" \
-  | python -c "import sys,json; print(len(json.load(sys.stdin)['data']),'models')"
-# expected: 12 models (or current SCX catalog size)
+```powershell
+npm --prefix .\src run build
 ```
 
-### Verify Continue config picks up HKCU
+Package artifacts currently exist through `src/SCXCode-0.1.27.vsix`.
 
-```bash
-# 1. Set env
-setx SCX_API_KEY sk-scx-test-value
+## Stores
 
-# 2. Reload VS Code (Ctrl+Shift+P → Developer: Reload Window)
-# 3. Open Continue chat → confirm any SCX model auth error message references sk-scx-test-value
+`store-mcp/kritical-local-store.mjs` provides a zero-native-dependency SQLite local file and symbol index using Node's `node:sqlite`.
+
+`store-mcp/kritical-chunk-store.mjs` and `store-mcp/kritical-chunk-server.mjs` provide content-addressed chunk storage, reassembly, and an HTTP API on `127.0.0.1:4270`.
+
+`store-mcp/kritical_store_mcp.py` exposes read-only SQL Server store tools through FastMCP against SQL Express or MSSQL.
+
+`install/Initialize-KritScxBackingStore.ps1` initializes the supervisor SQLite database and can apply the MSSQL schema in `sql/scxcode-supervisor-schema.mssql.sql`.
+
+## Mux And Supervisor
+
+`mux/Invoke-KritScxMuxMatrix.py` is the SCX-native mux matrix. It supports corpus loading from SQLite, MSSQL, and directories, model scoring, and synthesis.
+
+`mux/Invoke-KritAgentSupervisor.py` is the mixed supervisor. It can run free-router lanes and SCX-native lanes together, persist lane results to SQLite, and write a Markdown report.
+
+`mux/Invoke-KritScxMux.ps1` is the older shard mux path through LiteLLM on `4180` with optional SQL shard ingest.
+
+## Secrets
+
+Secrets stay outside repos. `free-router/scripts/Import-KritSecretsToEnv.ps1` reads external key files from `Github-SecretsOutsideOfGitRepos-JoshONLY`, loads process env vars, and can persist HKCU env vars. It prints only names, lengths, and hash prefixes.
+
+Primary vars:
+
+```text
+SCX_API_KEY
+OPENROUTER_API_KEY
+MISTRAL_API_KEY
+GROQ_API_KEY
+TOGETHER_API_KEY
+GOOGLE_API_KEY
+DEEPSEEK_API_KEY
+FIREWORKS_API_KEY
+COHERE_API_KEY
 ```
 
-### Verify audit-my-change custom command
+## Proof
 
-Highlight a code diff in VS Code → Continue chat → `/audit-my-change`. Should
-respond with a per-hard-rule OK/REFUSED list from CLAUDE.md.
+The end-to-end proof entrypoint is:
 
-## Cross-refs
+```powershell
+pwsh -NoProfile -File .\tests\Invoke-KritScxE2EProof.ps1 -Live
+```
 
-- Kritical `.5162` SCX + failover queue: see wave-block `WAVE-5162a-d` in
-  `KRTPax8ToShopifyConnector/scripts/state/supervisor-queue.json`
-- Ben SCX key origin: memory pin `scx-ben-key-preferred`
-- SCX-vs-Claude Code cost comparison: `KRTPax8ToShopifyConnector/reference/SISTER-APPS-AND-INCIDENTS-DOSSIER-5165.md` §E
+It validates the Mistral registry correction, PowerShell parse, JSON manifests, Python compile, SQLite schema, supervisor dry-run, agent pack install, VS Code build, and optional live SCX surface probe.
+
+## Kill Switches
+
+| Layer | Disable path |
+|---|---|
+| LiteLLM free router | `pwsh .\free-router\scripts\Start-KritFreeRouter.ps1 -Mode Stop` |
+| SCX Codex shim | stop the `127.0.0.1:4199` process |
+| Chunk server | stop the `127.0.0.1:4270` process |
+| Agent packs | `pwsh .\free-router\scripts\Install-KritAgentPack.ps1 -Mode Remove -Pack free` |
+| VS Code extension | uninstall the VSIX |
+| Decision logger DB ingest | `$env:KRITICAL_LOGGER_TARGET='none'` |
+
+(c) 2026 Kritical Pty Ltd. All rights reserved.

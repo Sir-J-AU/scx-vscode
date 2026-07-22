@@ -204,9 +204,20 @@ function Test-BinaryContainsUtf8([string]$Path, [string]$Needle) {
   return $text.Contains($Needle)
 }
 
+function Remove-KriticalTree([string]$Path) {
+  $resolved = Assert-UnderKriticalRoot $Path
+  if (-not (Test-Path -LiteralPath $resolved)) { return }
+  Get-ChildItem -LiteralPath $resolved -Force -Recurse |
+    Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 } |
+    ForEach-Object { throw "Refusing recursive remove because a reparse point exists under ${resolved}: $($_.FullName)" }
+  Remove-Item -LiteralPath $resolved -Recurse -Force
+}
+
 function Set-ScxBrandingOverlay([string]$Worktree) {
   $main = Join-Path $Worktree 'codex-rs\cli\src\main.rs'
   $content = Get-Content -LiteralPath $main -Raw
+  $packVersion = if ($script:PackVersion) { $script:PackVersion } else { '0.0.0' }
+  $displayVersion = "$packVersion (SCX Custom)"
 
   $content = $content.Replace(
     "/// Codex CLI`r`n///`r`n/// If no subcommand is specified, options will be forwarded to the interactive CLI.",
@@ -218,7 +229,7 @@ function Set-ScxBrandingOverlay([string]$Worktree) {
   )
   $content = $content.Replace(
     "    version,",
-    "    version,`r`n    about = `"Kritical.SCXCodex (OpenAI Codex customised for Southern Cross AI - https://scx.ai)`",`r`n    long_about = `"Kritical.SCXCodex`nOpenAI Codex customised for Southern Cross AI - https://scx.ai`","
+    "    name = `"Kritical.SCXCodex`",`r`n    version = `"$displayVersion`",`r`n    about = `"Kritical.SCXCodex $displayVersion - OpenAI Codex customised for Southern Cross AI - https://scx.ai`",`r`n    long_about = `"Kritical.SCXCodex $displayVersion`nOpenAI Codex customised for Southern Cross AI - https://scx.ai`","
   )
   $content = $content.Replace(
     '    // the generic `codex` command name that users run.',
@@ -236,7 +247,7 @@ function Set-ScxBrandingOverlay([string]$Worktree) {
   $content = $content.Replace('Diagnose local Codex installation, config, auth, and runtime health.', 'Diagnose local Kritical.SCXCodex installation, config, auth, and runtime health.')
   $content = $content.Replace('Run commands within a Codex-provided sandbox.', 'Run commands within a Kritical.SCXCodex-provided sandbox.')
 
-  if ($content -notmatch 'Kritical\.SCXCodex' -or $content -notmatch 'https://scx\.ai') {
+  if ($content -notmatch 'Kritical\.SCXCodex' -or $content -notmatch 'SCX Custom' -or $content -notmatch 'https://scx\.ai') {
     throw 'Branding overlay failed to inject required strings.'
   }
   Set-Content -LiteralPath $main -Value $content -Encoding utf8
@@ -251,11 +262,12 @@ function Get-UpstreamCommit([string]$SourceClone) {
 function Remove-Worktree([string]$SourceClone, [string]$Worktree) {
   if (Test-Path -LiteralPath $Worktree) {
     & git -C $SourceClone worktree remove --force $Worktree 2>$null
-    if (Test-Path -LiteralPath $Worktree) { Remove-Item -LiteralPath $Worktree -Recurse -Force }
+    if (Test-Path -LiteralPath $Worktree) { Remove-KriticalTree $Worktree }
   }
 }
 
 $manifestData = Read-Manifest $Manifest
+$script:PackVersion = if ($manifestData.pack_version) { [string]$manifestData.pack_version } else { '0.0.0' }
 $script:BuildTarget = if ($Target) { $Target } else { Get-DefaultWindowsRustTarget }
 $sourceClone = $manifestData.source_clone
 $buildRoot = if ($manifestData.build_root) { $manifestData.build_root } else { 'C:\KriticalSCX\build\scxcodex' }
@@ -269,6 +281,7 @@ $entrypoint = Join-Path $packageDir 'bin\Kritical.SCXCodex.exe'
 
 function Show-Status {
   Write-Host "`n=== Kritical.SCXCodex compiled package ===" -ForegroundColor Cyan
+  Write-Host "  pack version   : $script:PackVersion (SCX Custom)"
   Write-Host "  target         : $script:BuildTarget"
   Write-Host "  source clone   : $(if(Test-Path (Join-Path $sourceClone '.git')){'present'}else{'MISSING'}) $sourceClone"
   Write-Host "  package dir    : $(if(Test-Path $packageDir){'present'}else{'missing'}) $packageDir"
@@ -281,11 +294,17 @@ function Invoke-Verify {
   if (-not (Test-Path -LiteralPath (Join-Path $packageDir 'codex-package.json'))) { throw "Package metadata missing." }
   $metadata = Get-Content -LiteralPath (Join-Path $packageDir 'codex-package.json') -Raw | ConvertFrom-Json
   if ($metadata.entrypoint -ne 'bin/Kritical.SCXCodex.exe') { throw "Package entrypoint is not branded: $($metadata.entrypoint)" }
-  foreach ($needle in @('Kritical.SCXCodex', 'OpenAI Codex customised for Southern Cross AI', 'https://scx.ai')) {
+  foreach ($needle in @('Kritical.SCXCodex', "$script:PackVersion (SCX Custom)", 'OpenAI Codex customised for Southern Cross AI', 'https://scx.ai')) {
     if (-not (Test-BinaryContainsUtf8 -Path $entrypoint -Needle $needle)) {
       throw "Compiled binary does not contain required branding string: $needle"
     }
   }
+  $versionText = (& $entrypoint --version 2>&1 | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0) { throw "Compiled binary --version failed: $versionText" }
+  if ($versionText -notmatch 'Kritical\.SCXCodex' -or $versionText -notmatch [regex]::Escape($script:PackVersion) -or $versionText -notmatch 'SCX Custom') {
+    throw "Compiled binary --version is not branded/versioned: $versionText"
+  }
+  Write-Host "  version        : $versionText"
   Write-Host "Verified compiled Kritical.SCXCodex package." -ForegroundColor Green
 }
 
@@ -293,7 +312,7 @@ switch ($Mode) {
   'Clean' {
     $buildRootResolved = Assert-UnderKriticalRoot $buildRoot
     if (Test-Path -LiteralPath $sourceClone) { Remove-Worktree -SourceClone $sourceClone -Worktree $worktree }
-    if (Test-Path -LiteralPath $buildRootResolved) { Remove-Item -LiteralPath $buildRootResolved -Recurse -Force }
+    if (Test-Path -LiteralPath $buildRootResolved) { Remove-KriticalTree $buildRootResolved }
     Write-Host "Cleaned $buildRootResolved" -ForegroundColor Green
   }
   'Status' { Show-Status }
@@ -345,7 +364,9 @@ switch ($Mode) {
     $hash = (Get-FileHash -LiteralPath $entrypoint -Algorithm SHA256).Hash
     [ordered]@{
       product = 'Kritical.SCXCodex'
-      description = 'OpenAI Codex customised for Southern Cross AI - https://scx.ai'
+      packVersion = $script:PackVersion
+      displayVersion = "$script:PackVersion (SCX Custom)"
+      description = "Kritical.SCXCodex $script:PackVersion (SCX Custom) - OpenAI Codex customised for Southern Cross AI - https://scx.ai"
       utc = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
       upstreamCommit = $commit
       target = $script:BuildTarget

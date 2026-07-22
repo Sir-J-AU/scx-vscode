@@ -112,7 +112,7 @@ open(dossier, "w", encoding="utf-8").write("\n".join(lines))
 
 # brain receipt
 txt = "\n".join(lines)
-h = hashlib.sha256(("dossier|"+txt).encode()).hexdigest().upper()
+h = hashlib.sha256(txt.encode("utf-8", "replace")).hexdigest().upper()
 if cur.execute("SELECT COUNT(*) FROM dbo.decision_log WHERE content_sha256=?", h).fetchone()[0] == 0:
     cur.execute("INSERT dbo.decision_log(ts_utc,side,category,wave,session_id,content_sha256,simhash,content_len,content_gz,preview_120,model,provider,source,meta) "
                 "VALUES(SYSUTCDATETIME(),'ai','audit-dossier','.5216','corpus-audit',?,0,?,COMPRESS(CAST(? AS NVARCHAR(MAX))),?,'lens','scx','corpus-audit',?)",

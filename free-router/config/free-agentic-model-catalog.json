@@ -1,0 +1,198 @@
+{
+  "$schema": "https://kritical.net/schemas/free-agentic-model-catalog/v1",
+  "updated_utc": "2026-07-08T00:00:00Z",
+  "purpose": "Free-first and already-paid agentic coding lane catalog for Kritical CodingSystem.",
+  "routing_policy": {
+    "cost_order": [
+      "local",
+      "openrouter-free",
+      "mistral-free",
+      "google-free",
+      "together-free",
+      "groq-free",
+      "fireworks-free",
+      "cohere-free",
+      "scx-included",
+      "claude-max20-native",
+      "paid-explicit-only"
+    ],
+    "default_batch_order": [
+      "repo_scan",
+      "cheap_plan",
+      "parallel_drafts",
+      "scx_arbitrate",
+      "single_agent_apply",
+      "test_loop",
+      "review_loop",
+      "operator_summary"
+    ],
+    "paid_explicit_only": true
+  },
+  "lanes": [
+    {
+      "id": "local-ollama-coder",
+      "plane": "local",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "model": "qwen2.5-coder",
+      "cost": "local",
+      "best_for": ["private draft patches", "offline checks", "cheap lint reasoning"],
+      "requires": ["ollama"]
+    },
+    {
+      "id": "local-lmstudio-coder",
+      "plane": "local",
+      "base_url": "http://127.0.0.1:1234/v1",
+      "model": "local-model",
+      "cost": "local",
+      "best_for": ["offline model experiments", "private context"],
+      "requires": ["lmstudio"]
+    },
+    {
+      "id": "openrouter-hermes-free",
+      "plane": "openrouter-free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "nousresearch/hermes-3-llama-3.1-405b:free",
+      "cost": "free-tier",
+      "best_for": ["agentic planning", "multi-turn reasoning", "Hermes compatibility checks"],
+      "requires": ["OPENROUTER_API_KEY"]
+    },
+    {
+      "id": "openrouter-qwen3-coder-free",
+      "plane": "openrouter-free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "qwen/qwen3-coder:free",
+      "cost": "free-tier",
+      "best_for": ["coding drafts", "repo edits", "large-context code reasoning when available"],
+      "requires": ["OPENROUTER_API_KEY"]
+    },
+    {
+      "id": "openrouter-laguna-m1-free",
+      "plane": "openrouter-free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "poolside/laguna-m.1:free",
+      "cost": "free-tier",
+      "best_for": ["coding draft lane when OpenRouter exposes it"],
+      "requires": ["OPENROUTER_API_KEY"]
+    },
+    {
+      "id": "openrouter-nemotron-ultra-free",
+      "plane": "openrouter-free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "cost": "free-tier",
+      "best_for": ["long-context reasoning", "orchestration", "debug planning"],
+      "requires": ["OPENROUTER_API_KEY"]
+    },
+    {
+      "id": "openrouter-nemotron-super-free",
+      "plane": "openrouter-free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "cost": "free-tier",
+      "best_for": ["structured outputs", "tool use", "long-context debugging"],
+      "requires": ["OPENROUTER_API_KEY"]
+    },
+    {
+      "id": "openrouter-cohere-north-code-free",
+      "plane": "openrouter-free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "cohere/north-mini-code:free",
+      "cost": "free-tier",
+      "best_for": ["fast coding auxiliary lane", "terminal task drafts"],
+      "requires": ["OPENROUTER_API_KEY"]
+    },
+    {
+      "id": "mistral-codestral-free",
+      "plane": "mistral-free",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "codestral-latest",
+      "cost": "operator-verified-free-tier",
+      "daily_tokens": 2000000000,
+      "best_for": ["coding", "fill-in-the-middle", "autocomplete-style work"],
+      "requires": ["MISTRAL_API_KEY"]
+    },
+    {
+      "id": "mistral-devstral-free",
+      "plane": "mistral-free",
+      "base_url": "https://api.mistral.ai/v1",
+      "model": "devstral-latest",
+      "cost": "operator-verified-free-tier",
+      "daily_tokens": 2000000000,
+      "best_for": ["agentic coding", "repo understanding"],
+      "requires": ["MISTRAL_API_KEY"]
+    },
+    {
+      "id": "gemini-flash-free",
+      "plane": "google-free",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "model": "gemini-2.5-flash",
+      "cost": "free-tier",
+      "best_for": ["fast planning", "vision when needed", "cheap summaries"],
+      "requires": ["GOOGLE_API_KEY"]
+    },
+    {
+      "id": "groq-fast-free",
+      "plane": "groq-free",
+      "base_url": "https://api.groq.com/openai/v1",
+      "model": "llama-3.3-70b-versatile",
+      "cost": "free-tier",
+      "best_for": ["fast draft critique", "quick syntax reasoning"],
+      "requires": ["GROQ_API_KEY"]
+    },
+    {
+      "id": "together-open-free",
+      "plane": "together-free",
+      "base_url": "https://api.together.xyz/v1",
+      "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "cost": "free-tier",
+      "best_for": ["open-weight comparison lane", "draft summaries"],
+      "requires": ["TOGETHER_API_KEY"]
+    },
+    {
+      "id": "scx-coder-included",
+      "plane": "scx-included",
+      "base_url": "https://api.scx.ai/v1",
+      "model": "coder",
+      "cost": "existing-scx-allocation",
+      "context_policy": "reserve for synthesis and hard coding tasks",
+      "best_for": ["final code plan", "patch arbitration", "SCX-native coding"],
+      "requires": ["SCX_API_KEY"]
+    },
+    {
+      "id": "scx-minimax-included",
+      "plane": "scx-included",
+      "base_url": "https://api.scx.ai/v1",
+      "model": "MiniMax-M2.7",
+      "cost": "existing-scx-allocation",
+      "context_policy": "use bounded context; do not burn large history blindly",
+      "best_for": ["supervisor synthesis", "operator-ready final response"],
+      "requires": ["SCX_API_KEY"]
+    },
+    {
+      "id": "claude-max20-native",
+      "plane": "native-plan",
+      "model": "claude-code-native",
+      "cost": "existing-subscription-allocation",
+      "best_for": ["highest-quality terminal execution", "hard final implementation"],
+      "requires": ["claude"]
+    }
+  ],
+  "agent_runtimes": [
+    "kilo",
+    "codex",
+    "claude",
+    "opencode",
+    "aider",
+    "cline",
+    "roo-code",
+    "continue",
+    "hermes",
+    "openclaw",
+    "kiloclaw"
+  ],
+  "notes": [
+    "Free providers may throttle, change limits, or require account verification.",
+    "OpenClaw/KiloClaw are powerful 24/7 agent surfaces; run them with least-privilege tools and explicit repo boundaries.",
+    "No paid provider should be called unless it is already part of an existing subscription/allocation or explicitly enabled."
+  ]
+}

@@ -112,7 +112,7 @@ def run(argv=None):
         # .5231 (bughunt) — isolate each stream: a non-2xx / timeout raises HTTPError inside urlopen,
         # and list(ex.map(...)) would re-raise it and discard EVERY other successful stream. Catch here.
         try:
-            txt, tok, t = scx([
+            txt, tok, t = scx(args.model, [
                 {"role": "system", "content": sys_ctx},
                 {"role": "user", "content": f"{args.question}\n\n[Lens for THIS stream: {focus}]"},
             ], max_tokens=args.max_out)

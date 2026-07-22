@@ -49,15 +49,17 @@ function scxPost(path, body, keyOverride = null) {
     const useKey = keyOverride || SCX_KEY;
     if (!useKey) return reject(new Error('SCX_API_KEY not set (need HKCU env or MCP env)'));
     const url = new URL(path, SCX_BASE);
+    const headers = {
+      authorization: `Bearer ${useKey}`,
+      'x-api-key': useKey,
+      'content-type': 'application/json',
+    };
+    if (url.pathname.endsWith('/messages')) headers['anthropic-version'] = '2023-06-01';
     const req = https.request({
       method: 'POST',
       hostname: url.hostname,
       path: url.pathname,
-      headers: {
-        'x-api-key': useKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers,
     }, (res) => {
       let buf = '';
       res.on('data', (c) => (buf += c));
@@ -80,7 +82,7 @@ function scxGet(path) {
       method: 'GET',
       hostname: url.hostname,
       path: url.pathname,
-      headers: { 'x-api-key': SCX_KEY },
+      headers: { authorization: `Bearer ${SCX_KEY}`, 'x-api-key': SCX_KEY },
     }, (res) => {
       let buf = '';
       res.on('data', (c) => (buf += c));
